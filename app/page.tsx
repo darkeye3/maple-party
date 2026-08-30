@@ -1,10 +1,11 @@
 'use client';
 
 import Image from 'next/image';
-import { SyntheticEvent, useMemo, useState } from 'react';
-import { Calculator, CircleHelp, Database, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
+import { Calculator, CircleHelp, Database, ExternalLink, KeyRound, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -43,6 +44,13 @@ export default function Home() {
   const [sort, setSort] = useState<Sort>('site');
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('팸귄 비숍의 83,583 스크린샷을 기준점으로 계산했습니다.');
+  const [apiDialogOpen, setApiDialogOpen] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+
+  useEffect(() => {
+    const storedKey = sessionStorage.getItem('nexon-open-api-key');
+    if (storedKey) queueMicrotask(() => setApiKey(storedKey));
+  }, []);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
   const exactAnchor = hexa === REFERENCE_HEXA && profile.nickname === REFERENCE_PROFILE.nickname;
@@ -58,14 +66,16 @@ export default function Home() {
     return filtered;
   }, [filter, hexa, profile, sort]);
 
-  async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function loadCharacter(key = apiKey) {
     if (!nickname.trim()) return setNotice('닉네임을 입력해 주세요.');
     if (!hexa) return setNotice('헥사환산 값을 입력해 주세요.');
     setLoading(true);
     try {
-      const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}`);
-      const data = await response.json() as CharacterProfile & { error?: string };
+      const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}`, {
+        headers: key ? { 'x-nexon-api-key': key } : {},
+      });
+      const data = await response.json() as CharacterProfile & { error?: string; code?: string };
+      if (data.code === 'API_KEY_REQUIRED') setApiDialogOpen(true);
       if (!response.ok) throw new Error(data.error ?? '캐릭터 정보를 불러오지 못했습니다.');
       setProfile(data as CharacterProfile);
       setNotice(data.source === 'nexon'
@@ -76,6 +86,22 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await loadCharacter();
+  }
+
+  async function handleApiKeySave(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedKey = apiKey.trim();
+    setApiKey(trimmedKey);
+    if (trimmedKey) sessionStorage.setItem('nexon-open-api-key', trimmedKey);
+    else sessionStorage.removeItem('nexon-open-api-key');
+    setApiDialogOpen(false);
+    if (trimmedKey) await loadCharacter(trimmedKey);
+    else setNotice('NEXON Open API 연결을 해제했습니다.');
   }
 
   return (
@@ -90,9 +116,14 @@ export default function Home() {
                 <p className="text-[11px] text-[#747b88]">비숍 헥사환산 배율 계산기</p>
               </div>
             </div>
-            <Badge variant="outline" className="h-7 gap-1.5 rounded-md border-[#dfe2e8] bg-[#fafbfc] px-2.5 text-[#535b68]">
-              <Database className="size-3.5" /> {profile.source === 'nexon' ? 'NEXON Open API' : '기준 스냅샷'}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setApiDialogOpen(true)} className={`h-8 rounded-md px-2.5 text-xs ${apiKey ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-[#dfe2e8] text-[#535b68]'}`}>
+                <KeyRound className="size-3.5" /> {apiKey ? 'API 연결됨' : 'API 연결'}
+              </Button>
+              <Badge variant="outline" className="h-8 max-w-44 gap-1.5 truncate rounded-md border-[#dfe2e8] bg-[#fafbfc] px-2.5 text-[#535b68]">
+                <Database className="size-3.5 shrink-0" /> <span className="truncate">{profile.nickname} · {profile.source === 'nexon' ? '공식 API' : '기준값'}</span>
+              </Badge>
+            </div>
           </div>
         </header>
 
@@ -192,6 +223,25 @@ export default function Home() {
           </section>
         </main>
       </div>
+      <Dialog open={apiDialogOpen} onOpenChange={setApiDialogOpen}>
+        <DialogContent className="rounded-lg sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><KeyRound className="size-4 text-[#eb5b35]" /> NEXON Open API 연결</DialogTitle>
+            <DialogDescription>키는 현재 브라우저 탭에만 보관되며 캐릭터 조회 요청에만 사용됩니다.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleApiKeySave} className="space-y-4">
+            <label htmlFor="nexon-api-key" className="block text-xs font-semibold text-[#535b68]">메이플스토리 API 키</label>
+            <Input id="nexon-api-key" type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] font-mono" placeholder="NEXON Open API 키" />
+            <a href="https://openapi.nexon.com/game/maplestory/" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-[#175fd2] hover:underline">
+              공식 API 키 발급 <ExternalLink className="size-3" />
+            </a>
+            <DialogFooter className="mt-1 rounded-b-lg">
+              <Button type="button" variant="outline" onClick={() => { setApiKey(''); sessionStorage.removeItem('nexon-open-api-key'); setApiDialogOpen(false); setNotice('NEXON Open API 연결을 해제했습니다.'); }} className="rounded-md">연결 해제</Button>
+              <Button type="submit" className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">저장 후 조회</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Tooltip>
   );
 }

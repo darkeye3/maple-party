@@ -15,10 +15,11 @@ function statValue(stats: FinalStat[], names: string[]) {
 export async function GET(request: Request) {
   const nickname = new URL(request.url).searchParams.get('nickname')?.trim();
   if (!nickname) return Response.json({ error: '닉네임을 입력해 주세요.' }, { status: 400 });
-  const apiKey = process.env.NEXON_API_KEY;
+  const requestApiKey = request.headers.get('x-nexon-api-key')?.trim();
+  const apiKey = requestApiKey || process.env.NEXON_API_KEY;
   if (!apiKey) {
     if (nickname === REFERENCE_PROFILE.nickname) return Response.json(REFERENCE_PROFILE);
-    return Response.json({ error: 'NEXON_API_KEY가 연결되지 않아 기준 캐릭터만 조회할 수 있습니다.', code: 'API_NOT_CONFIGURED' }, { status: 503 });
+    return Response.json({ error: '다른 캐릭터를 조회하려면 NEXON Open API 키를 연결해 주세요.', code: 'API_KEY_REQUIRED' }, { status: 401 });
   }
 
   const headers = { 'x-nxopen-api-key': apiKey };
