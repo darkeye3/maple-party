@@ -363,7 +363,7 @@ export function PartyBoard({
                   const characterImage = member.nickname === profile.nickname ? profile.image ?? member.characterImage : member.characterImage;
                   return <article key={member.id} className="overflow-hidden rounded-lg border border-[#dfe2e8] bg-white">
                     <div className="grid h-[300px] place-items-end overflow-hidden bg-[#f3f5f7]">
-                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="size-[300px] max-w-full object-contain object-bottom [image-rendering:pixelated]" /> : <div className="grid size-[300px] max-w-full place-items-center text-[#8a919d]"><CircleUserRound className="size-12" /></div>}
+                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="size-[300px] max-w-full object-contain object-bottom" /> : <div className="grid size-[300px] max-w-full place-items-center text-[#8a919d]"><CircleUserRound className="size-12" /></div>}
                     </div>
                     <div className="border-t border-[#e3e6eb] p-3.5">
                       <div className="flex items-center justify-between gap-2">
