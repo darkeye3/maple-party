@@ -48,6 +48,15 @@ function textValue(value: unknown) {
   return typeof value === 'string' ? value : '';
 }
 
+function characterImageValue(value: unknown) {
+  try {
+    const image = new URL(textValue(value));
+    return image.protocol === 'https:' && image.hostname === 'open.api.nexon.com' ? image.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
 function memberFromRow(row: MemberRow): PartyMember {
   return {
     id: row.id,
@@ -159,6 +168,23 @@ export async function POST(request: Request) {
     await ensurePartySchema();
     const body = await request.json() as Record<string, unknown>;
     const action = textValue(body.action);
+    if (action === 'sync-profile') {
+      const nickname = textValue(body.nickname).trim();
+      const characterImage = characterImageValue(body.characterImage);
+      if (!nickname || !characterImage) throw new PartyRequestError('동기화할 공식 캐릭터 이미지를 확인하지 못했습니다.');
+      const database = partyDatabase();
+      await database.prepare(`
+        UPDATE party_members
+        SET character_image = ?
+        WHERE nickname = ?
+          AND party_id IN (
+            SELECT id FROM parties
+            WHERE departure_at > ? AND status != 'cancelled'
+          )
+      `).bind(characterImage, nickname, new Date().toISOString()).run();
+      return Response.json({ parties: await loadParties() });
+    }
+
     if (action === 'create') {
       const bossId = textValue(body.bossId);
       const boss = getBossDefinition(bossId);

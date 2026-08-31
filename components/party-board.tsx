@@ -113,6 +113,31 @@ export function PartyBoard({
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!profileMatchesNickname || !profile.image) return;
+    const controller = new AbortController();
+    fetch('/api/parties', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'sync-profile',
+        nickname: profile.nickname,
+        characterImage: profile.image,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json() as PartyActionResponse;
+        if (!response.ok) throw new Error(data.error ?? '캐릭터 이미지를 동기화하지 못했습니다.');
+        return data.parties ?? [];
+      })
+      .then((items) => setParties(items))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : '캐릭터 이미지를 동기화하지 못했습니다.');
+      });
+    return () => controller.abort();
+  }, [profile.image, profile.nickname, profileMatchesNickname]);
+
   function changeBossName(value: string) {
     setBossName(value);
     setBossId(partyBosses.find((boss) => boss.name === value)?.id ?? '');

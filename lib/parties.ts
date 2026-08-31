@@ -29,5 +29,6 @@ export type PartyPost = {
 
 export type PartyActionResponse = {
   party?: PartyPost;
+  parties?: PartyPost[];
   error?: string;
 };
