@@ -9,11 +9,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { PartyBoard } from '@/components/party-board';
 import { BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'range' | 'all' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
 type NoticeKind = 'info' | 'success' | 'error';
+type View = 'parties' | 'calculator';
 
 const filters: Array<{ value: Filter; label: string }> = [
   { value: 'range', label: '내 기준' },
@@ -56,6 +58,7 @@ function statusClass(key: string) {
 }
 
 export default function Home() {
+  const [view, setView] = useState<View>('parties');
   const [nickname, setNickname] = useState(REFERENCE_PROFILE.nickname);
   const [hexaInput, setHexaInput] = useState(String(REFERENCE_HEXA));
   const [profile, setProfile] = useState<CharacterProfile>(REFERENCE_PROFILE);
@@ -80,9 +83,9 @@ export default function Home() {
   const exactAnchor = hexa === REFERENCE_HEXA && profile.source === 'reference';
   const profileMatchesNickname = nickname.trim() === profile.nickname;
   const engine = useMemo(() => calculateEngineSummary(hexa, profile), [hexa, profile]);
+  const allBossResults = useMemo(() => calculateBosses(hexa, profile), [hexa, profile]);
   const results = useMemo(() => {
-    const calculated = calculateBosses(hexa, profile);
-    const filtered = calculated.filter((boss) => {
+    const filtered = allBossResults.filter((boss) => {
       if (filter === 'range') {
         const minimumRate = boss.partyBoss ? 85 / boss.partyLimit : 15;
         return boss.rate >= minimumRate && boss.rate <= 1000;
@@ -93,7 +96,7 @@ export default function Home() {
     if (sort === 'difficulty') return [...filtered].sort((a, b) => b.cardStat - a.cardStat);
     if (sort === 'rate') return [...filtered].sort((a, b) => a.rate - b.rate);
     return filtered;
-  }, [filter, hexa, profile, sort]);
+  }, [allBossResults, filter, sort]);
 
   async function loadCharacter(key = apiKey) {
     if (!nickname.trim()) {
@@ -170,10 +173,14 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <span className="grid size-8 place-items-center rounded-md bg-[#eb5b35] text-white"><Calculator className="size-4.5" /></span>
               <div>
-                <p className="text-[15px] font-bold leading-tight">보스컷 랩</p>
-                <p className="text-[11px] text-[#747b88]">비숍 현대 계산 엔진</p>
+                <p className="text-[15px] font-bold leading-tight">MapleParty</p>
+                <p className="text-[11px] text-[#747b88]">배율 기반 보스 파티 모집</p>
               </div>
             </div>
+            <nav className="hidden items-center gap-1 rounded-md bg-[#f1f3f5] p-1 sm:flex" aria-label="주요 화면">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setView('parties')} className={`h-7 rounded-sm px-3 text-xs ${view === 'parties' ? 'bg-white font-bold shadow-sm hover:bg-white' : 'text-[#687080]'}`}>파티 모집</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-7 rounded-sm px-3 text-xs ${view === 'calculator' ? 'bg-white font-bold shadow-sm hover:bg-white' : 'text-[#687080]'}`}>보스 배율</Button>
+            </nav>
             <div className="flex items-center gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => setEngineDialogOpen(true)} className="h-8 rounded-md border-[#dfe2e8] px-2.5 text-xs text-[#535b68]">
                 <Activity className="size-3.5" /> 계산식
@@ -188,7 +195,29 @@ export default function Home() {
           </div>
         </header>
 
+        <nav className="flex border-b border-[#dfe2e8] bg-white p-1 sm:hidden" aria-label="주요 화면">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setView('parties')} className={`h-8 flex-1 rounded-sm text-xs ${view === 'parties' ? 'bg-[#20242c] font-bold text-white hover:bg-[#20242c] hover:text-white' : 'text-[#687080]'}`}>파티 모집</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-8 flex-1 rounded-sm text-xs ${view === 'calculator' ? 'bg-[#20242c] font-bold text-white hover:bg-[#20242c] hover:text-white' : 'text-[#687080]'}`}>보스 배율</Button>
+        </nav>
+
         <main>
+          {view === 'parties' ? (
+            <PartyBoard
+              profile={profile}
+              nickname={nickname}
+              hexaInput={hexaInput}
+              hexaStat={hexa}
+              profileMatchesNickname={profileMatchesNickname}
+              characterLoading={loading}
+              bossResults={allBossResults}
+              apiKey={apiKey}
+              onNicknameChange={handleNicknameChange}
+              onHexaChange={setHexaInput}
+              onLookup={() => loadCharacter()}
+              onOpenCalculator={() => setView('calculator')}
+            />
+          ) : (
+          <>
           <section className="border-b border-[#dfe2e8] bg-white">
             <div className="mx-auto max-w-[1540px] px-4 py-5 sm:px-6">
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
@@ -314,6 +343,8 @@ export default function Home() {
               ))}
             </div>
           </section>
+          </>
+          )}
         </main>
       </div>
       <Dialog open={apiDialogOpen} onOpenChange={setApiDialogOpen}>

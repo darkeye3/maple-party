@@ -496,3 +496,7 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
 export function formatRate(rate: number) {
   return rate >= 100 ? `${rate.toFixed(1)}%` : `${rate.toFixed(2)}%`;
 }
+
+export function getBossDefinition(id: string) {
+  return bosses.find((boss) => boss.id === id);
+}
