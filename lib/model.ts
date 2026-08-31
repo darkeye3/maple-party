@@ -1,3 +1,5 @@
+import type { BestCondition } from './presets';
+
 export type CharacterProfile = {
   nickname: string;
   characterClass: string;
@@ -5,11 +7,14 @@ export type CharacterProfile = {
   arcaneForce: number;
   authenticForce: number;
   ignoreDefense: number;
+  damage: number;
   bossDamage: number;
+  criticalRate: number;
   criticalDamage: number;
   image?: string;
   hexaCoreCount?: number;
   hexaStatCoreCount?: number;
+  bestCondition?: BestCondition;
   source: 'reference' | 'nexon';
 };
 
@@ -41,6 +46,14 @@ export type BossResult = BossDefinition & {
   status: BossStatus;
 };
 
+export type EngineSummary = {
+  calculatedHexaDamage300: number;
+  calculatedHexaDamage380: number;
+  calculatedHexaDamageKaling: number;
+  boss300HexaStat: number;
+  boss380HexaStat: number;
+};
+
 export const REFERENCE_HEXA = 83_583;
 
 export const REFERENCE_PROFILE: CharacterProfile = {
@@ -50,10 +63,16 @@ export const REFERENCE_PROFILE: CharacterProfile = {
   arcaneForce: 1360,
   authenticForce: 620,
   ignoreDefense: 96.3304,
+  damage: 71,
   bossDamage: 465,
+  criticalRate: 100,
   criticalDamage: 102.35,
   source: 'reference',
 };
+
+const BISHOP_ADDITIONAL_IGNORE_DEFENSE = 0.693727598412758;
+const BISHOP_300_RAW_DAMAGE_RATIO = 0.9800288014014769;
+const BISHOP_KALING_DAMAGE_RATIO = 0.9739554098846646;
 
 const spline300: Spline = {
   x: [0, 23716, 31615, 44999, 55216, 67090, 83643, 96746, 108468, 117023, 127726, 140485, 151698],
@@ -99,7 +118,7 @@ const bosses: BossDefinition[] = [
   { id: 'champion-black-mage', name: '검은 마법사', difficulty: '챔피언', image: '/bosses/champion_blackMage.png', level: 275, arcaneForce: 1320, partyLimit: 1, anchorRate: 992.7, anchorStat: 79883, guard: 300 },
 ];
 
-function splineValue(spline: Spline, value: number) {
+export function splineValue(spline: Spline, value: number) {
   const last = spline.x.length - 1;
   if (value <= spline.x[0]) return spline.y[0] + spline.m[0] * (value - spline.x[0]);
   if (value >= spline.x[last]) return spline.y[last] + spline.m[last] * (value - spline.x[last]);
@@ -115,7 +134,7 @@ function splineValue(spline: Spline, value: number) {
     + (t3 - t2) * width * spline.m[index + 1];
 }
 
-function inverseSpline(spline: Spline, target: number) {
+export function inverseSpline(spline: Spline, target: number) {
   let low = 0;
   let high = 250_000;
   for (let iteration = 0; iteration < 40; iteration += 1) {
@@ -175,6 +194,11 @@ function combatContext(profile: CharacterProfile, boss: BossDefinition) {
   return multiplier;
 }
 
+function bishopDefenseConstant(ignoreDefense: number, guard: 300 | 380) {
+  const effectiveIgnore = 1 - (1 - ignoreDefense / 100) * (1 - BISHOP_ADDITIONAL_IGNORE_DEFENSE);
+  return Math.max(0.01, 1 - (guard / 100) * (1 - effectiveIgnore));
+}
+
 function statusFor(ratePercent: number, boss: BossDefinition): BossStatus {
   const rate = ratePercent / 100;
   if (boss.partyBoss) {
@@ -197,12 +221,33 @@ function statusFor(ratePercent: number, boss: BossDefinition): BossStatus {
   return { key: 'impossible', label: '불가능' };
 }
 
-export function calculateBosses(hexaStat: number, profile: CharacterProfile): BossResult[] {
+export function calculateEngineSummary(hexaStat: number, profile: CharacterProfile): EngineSummary {
   const safeHexa = Math.max(0, Math.min(250_000, hexaStat));
-  const referenceDamage = splineValue(spline380, REFERENCE_HEXA);
-  const inputDamage = splineValue(spline380, safeHexa);
+  const condition = profile.bestCondition;
+  const baseIgnoreDefense = condition?.baseIgnoreDefense ?? profile.ignoreDefense;
+  const offenseMultiplier = condition?.multiplier ?? 1;
+  const defenseMultiplier300 = condition?.defenseMultiplier300 ?? 1;
+  const defenseMultiplier380 = condition?.defenseMultiplier380 ?? 1;
+  const baseDamage380 = splineValue(spline380, safeHexa);
+  const currentDefenseRatio = bishopDefenseConstant(baseIgnoreDefense, 300) / bishopDefenseConstant(baseIgnoreDefense, 380);
+  const calculatedHexaDamage380 = baseDamage380 * offenseMultiplier * defenseMultiplier380;
+  const calculatedHexaDamage300 = baseDamage380 * BISHOP_300_RAW_DAMAGE_RATIO * currentDefenseRatio * offenseMultiplier * defenseMultiplier300;
+  return {
+    calculatedHexaDamage300,
+    calculatedHexaDamage380,
+    calculatedHexaDamageKaling: calculatedHexaDamage380 * BISHOP_KALING_DAMAGE_RATIO,
+    boss300HexaStat: inverseSpline(spline300, calculatedHexaDamage300),
+    boss380HexaStat: inverseSpline(spline380, calculatedHexaDamage380),
+  };
+}
+
+export function calculateBosses(hexaStat: number, profile: CharacterProfile): BossResult[] {
+  const reference = calculateEngineSummary(REFERENCE_HEXA, REFERENCE_PROFILE);
+  const input = calculateEngineSummary(hexaStat, profile);
   return bosses.map((boss) => {
     const guardSpline = boss.guard === 300 ? spline300 : spline380;
+    const referenceDamage = boss.guard === 300 ? reference.calculatedHexaDamage300 : reference.calculatedHexaDamage380;
+    const inputDamage = boss.guard === 300 ? input.calculatedHexaDamage300 : input.calculatedHexaDamage380;
     const contextRatio = combatContext(profile, boss) / combatContext(REFERENCE_PROFILE, boss);
     const rate = boss.anchorRate * (inputDamage / referenceDamage) * contextRatio;
     const anchorConversion = splineValue(guardSpline, boss.anchorStat) / referenceDamage;

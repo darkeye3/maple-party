@@ -1,4 +1,5 @@
 import { REFERENCE_PROFILE } from '@/lib/model';
+import { optimizePresets } from '@/lib/presets';
 
 const API_BASE = 'https://open.api.nexon.com/maplestory/v1';
 type FinalStat = { stat_name: string; stat_value: string };
@@ -33,6 +34,11 @@ async function upstreamError(response: Response, endpoint: string) {
   }, { status: 502 });
 }
 
+async function optionalJson(path: string, ocid: string, headers: Record<string, string>) {
+  const response = await nexonFetch(`${API_BASE}/${path}?ocid=${encodeURIComponent(ocid)}`, headers);
+  return response.ok ? response.json().catch(() => undefined) : undefined;
+}
+
 export async function GET(request: Request) {
   const nickname = new URL(request.url).searchParams.get('nickname')?.trim();
   if (!nickname) return Response.json({ error: '닉네임을 입력해 주세요.' }, { status: 400 });
@@ -49,30 +55,46 @@ export async function GET(request: Request) {
   const { ocid } = await idResponse.json() as { ocid?: string };
   if (!ocid) return Response.json({ error: '캐릭터 식별값을 받지 못했습니다.' }, { status: 502 });
 
-  const basicResponse = await nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers);
+  const [basicResponse, statResponse, symbols, items, ability, hyper, links, union] = await Promise.all([
+    nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers),
+    nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers),
+    optionalJson('character/symbol-equipment', ocid, headers),
+    optionalJson('character/item-equipment', ocid, headers),
+    optionalJson('character/ability', ocid, headers),
+    optionalJson('character/hyper-stat', ocid, headers),
+    optionalJson('character/link-skill', ocid, headers),
+    optionalJson('user/union-raider', ocid, headers),
+  ]);
   if (!basicResponse.ok) return upstreamError(basicResponse, '기본 정보');
-  const statResponse = await nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers);
   if (!statResponse.ok) return upstreamError(statResponse, '종합 능력치');
-  const symbolsResponse = await nexonFetch(`${API_BASE}/character/symbol-equipment?ocid=${encodeURIComponent(ocid)}`, headers);
-  const [basic, stat, symbols] = await Promise.all([
+  const [basic, stat] = await Promise.all([
     basicResponse.json(),
     statResponse.json(),
-    symbolsResponse.ok ? symbolsResponse.json() : Promise.resolve({}),
   ]);
   const finalStats = (stat as { final_stat?: FinalStat[] }).final_stat ?? [];
-  const symbolItems = (symbols as { symbol?: Array<{ symbol_name?: string; symbol_force?: number }> }).symbol ?? [];
+  const symbolItems = (symbols as { symbol?: Array<{ symbol_name?: string; symbol_force?: number }> } | undefined)?.symbol ?? [];
   const symbolForce = (type: string) => symbolItems.filter((symbol) => symbol.symbol_name?.includes(type)).reduce((total, symbol) => total + numeric(symbol.symbol_force), 0);
+  const characterClass = (basic as { character_class?: string }).character_class ?? '알 수 없음';
+  const currentStats = {
+    ignoreDefense: statValue(finalStats, ['방어율 무시']),
+    damage: statValue(finalStats, ['데미지']),
+    bossDamage: statValue(finalStats, ['보스 몬스터 데미지']),
+    criticalRate: statValue(finalStats, ['크리티컬 확률']),
+    criticalDamage: statValue(finalStats, ['크리티컬 데미지']),
+  };
+  const optimized = characterClass === '비숍'
+    ? optimizePresets(currentStats, { items, ability, hyper, links, union })
+    : undefined;
 
   return Response.json({
     nickname,
-    characterClass: (basic as { character_class?: string }).character_class ?? '알 수 없음',
+    characterClass,
     level: numeric((basic as { character_level?: number }).character_level),
     image: (basic as { character_image?: string }).character_image,
     arcaneForce: statValue(finalStats, ['아케인포스']) || symbolForce('아케인'),
     authenticForce: statValue(finalStats, ['어센틱포스']) || symbolForce('어센틱'),
-    ignoreDefense: statValue(finalStats, ['방어율 무시']),
-    bossDamage: statValue(finalStats, ['보스 몬스터 데미지']),
-    criticalDamage: statValue(finalStats, ['크리티컬 데미지']),
+    ...(optimized?.profile ?? currentStats),
+    bestCondition: optimized?.bestCondition,
     source: 'nexon',
   });
 }

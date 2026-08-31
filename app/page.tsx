@@ -2,14 +2,14 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { Calculator, CircleHelp, Database, ExternalLink, KeyRound, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { calculateBosses, CharacterProfile, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
+import { calculateBosses, calculateEngineSummary, CharacterProfile, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'all' | 'challenge' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
@@ -25,9 +25,26 @@ const statItems = (profile: CharacterProfile) => [
   ['직업 / 레벨', `${profile.characterClass} · Lv.${profile.level}`],
   ['아케인 / 어센틱', `${profile.arcaneForce.toLocaleString()} / ${profile.authenticForce.toLocaleString()}`],
   ['방어율 무시', `${profile.ignoreDefense.toFixed(4)}%`],
-  ['보스 데미지', `${profile.bossDamage.toFixed(0)}%`],
-  ['크리티컬 데미지', `${profile.criticalDamage.toFixed(2)}%`],
+  ['데미지 / 보스', `${profile.damage.toFixed(0)}% / ${profile.bossDamage.toFixed(0)}%`],
+  ['크확 / 크뎀', `${profile.criticalRate.toFixed(1)}% / ${profile.criticalDamage.toFixed(2)}%`],
 ];
+
+function formatDamage(value: number) {
+  return `${(value / 100_000_000).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}억`;
+}
+
+function selectedPresets(profile: CharacterProfile) {
+  const selection = profile.bestCondition?.selection;
+  if (!selection) return '현재 적용 프리셋';
+  const labels = [
+    ['장비', selection.item],
+    ['어빌', selection.ability],
+    ['하이퍼', selection.hyperStat],
+    ['링크', selection.linkSkill],
+    ['유니온', selection.union],
+  ];
+  return labels.filter((item) => item[1] != null).map(([label, value]) => `${label} ${value}`).join(' · ');
+}
 
 function statusClass(key: string) {
   if (key === 'impossible') return 'bg-red-50 text-red-700 ring-red-200';
@@ -55,7 +72,8 @@ export default function Home() {
   }, []);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
-  const exactAnchor = hexa === REFERENCE_HEXA && profile.nickname === REFERENCE_PROFILE.nickname;
+  const exactAnchor = hexa === REFERENCE_HEXA && profile.source === 'reference';
+  const engine = useMemo(() => calculateEngineSummary(hexa, profile), [hexa, profile]);
   const results = useMemo(() => {
     const calculated = calculateBosses(hexa, profile);
     const filtered = calculated.filter((boss) => {
@@ -88,7 +106,7 @@ export default function Home() {
       setProfile(data as CharacterProfile);
       setNoticeKind('success');
       setNotice(data.source === 'nexon'
-        ? `${data.characterClass === '비숍' ? '넥슨 Open API 정보로 계산했습니다.' : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}`
+        ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종을 비교해 최고 조건으로 계산했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}`
         : '저장된 기준 스냅샷으로 계산했습니다.');
     } catch (error) {
       setNoticeKind('error');
@@ -154,7 +172,7 @@ export default function Home() {
                   <TooltipTrigger className="ml-0.5 grid size-6 place-items-center rounded-md hover:bg-[#f1f3f5]" aria-label="계산 기준 설명">
                     <CircleHelp className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent className="max-w-72">Maplescouter 내부의 직업별 보정값은 공개되지 않아, 확보한 비숍 기준점과 스플라인을 사용합니다.</TooltipContent>
+                  <TooltipContent className="max-w-72">비숍의 300·380 스플라인과 실전 방무·카링 계수를 역산해 적용하며, 프리셋 효과는 공식 API 옵션값으로 비교합니다.</TooltipContent>
                 </div>
               </div>
 
@@ -185,6 +203,37 @@ export default function Home() {
                   <p className="mt-0.5 text-sm font-bold tabular-nums text-[#282d36]">{value}</p>
                 </div>
               ))}
+            </div>
+          </section>
+
+          <section className="border-b border-[#dfe2e8] bg-white">
+            <div className="mx-auto flex max-w-[1540px] flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0 lg:w-[38%]">
+                <div className="flex items-center gap-2">
+                  <Crown className="size-4 text-[#eb5b35]" />
+                  <p className="text-xs font-bold text-[#3a404a]">{profile.bestCondition?.applied ? '최고 컨디션 자동 적용' : '현재 컨디션'}</p>
+                  {profile.bestCondition?.applied && (
+                    <Badge variant="outline" className="rounded-sm border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">
+                      실전딜 +{profile.bestCondition.improvementPercent.toFixed(2)}%
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-1.5 truncate text-xs font-medium text-[#687080]">{selectedPresets(profile)}</p>
+              </div>
+              <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-[#e3e6eb] border-y border-[#e3e6eb] sm:grid-cols-5 sm:divide-y-0 lg:border-y-0">
+                {[
+                  ['300 피해량', formatDamage(engine.calculatedHexaDamage300), Math.round(engine.calculatedHexaDamage300).toLocaleString()],
+                  ['380 피해량', formatDamage(engine.calculatedHexaDamage380), Math.round(engine.calculatedHexaDamage380).toLocaleString()],
+                  ['카링 피해량', formatDamage(engine.calculatedHexaDamageKaling), Math.round(engine.calculatedHexaDamageKaling).toLocaleString()],
+                  ['300 표시 헥환', engine.boss300HexaStat.toLocaleString(), ''],
+                  ['380 표시 헥환', engine.boss380HexaStat.toLocaleString(), ''],
+                ].map(([label, value, exact]) => (
+                  <div key={label} className="min-w-0 px-3 py-2.5 first:pl-0 sm:py-1" title={exact || undefined}>
+                    <p className="flex items-center gap-1 truncate text-[10px] font-medium text-[#7a818d]"><Gauge className="size-3 shrink-0" />{label}</p>
+                    <p className="mt-1 truncate text-sm font-bold tabular-nums text-[#282d36]">{value}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </section>
 
