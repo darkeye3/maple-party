@@ -3,6 +3,7 @@ export type PartyMember = {
   nickname: string;
   characterClass: string;
   characterLevel: number;
+  characterImage?: string;
   hexaStat: number;
   verifiedRate: number;
   role: 'leader' | 'member';
@@ -22,6 +23,7 @@ export type PartyPost = {
   leaderRate: number;
   status: 'open' | 'full' | 'cancelled';
   createdAt: string;
+  totalRate: number;
   members: PartyMember[];
 };
 

@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
+import { CalendarClock, Check, CircleUserRound, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -283,8 +283,9 @@ export function PartyBoard({
                       <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-[#4d5562]"><CalendarClock className="size-3.5 text-[#7a818d]" />{departureLabel(party.departureAt)}</p>
                     </div>
                   </div>
-                  <div className="mt-4 grid grid-cols-3 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
+                  <div className="mt-4 grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
                     <div><p className="text-[10px] text-[#818894]">최소 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums">{rateLabel(party.minimumRate)}</p></div>
+                    <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums text-[#1f5ed5]">{rateLabel(party.totalRate)}</p></div>
                     <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold tabular-nums">{party.members.length}/{party.capacity}</p></div>
                     <div><p className="text-[10px] text-[#818894]">내 배율</p><p className={`mt-0.5 text-sm font-bold tabular-nums ${eligible ? 'text-emerald-700' : 'text-[#687080]'}`}>{profileMatchesNickname && myRate != null ? rateLabel(myRate) : '-'}</p></div>
                   </div>
@@ -324,15 +325,25 @@ export function PartyBoard({
         <DialogContent className="rounded-lg sm:max-w-lg">
           {selectedParty && <>
             <DialogHeader><DialogTitle>{selectedParty.difficulty} {selectedParty.bossName}</DialogTitle><DialogDescription>{departureLabel(selectedParty.departureAt)} 출발 · 최소 {rateLabel(selectedParty.minimumRate)}</DialogDescription></DialogHeader>
-            <div className="grid grid-cols-3 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
+            <div className="grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
               <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold">{selectedParty.members.length}/{selectedParty.capacity}</p></div>
+              <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold text-[#1f5ed5]">{rateLabel(selectedParty.totalRate)}</p></div>
               <div><p className="text-[10px] text-[#818894]">내 배율</p><p className="mt-0.5 text-sm font-bold">{selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
               <div><p className="text-[10px] text-[#818894]">남은 자리</p><p className="mt-0.5 text-sm font-bold">{Math.max(0, selectedParty.capacity - selectedParty.members.length)}명</p></div>
             </div>
             <div>
               <p className="mb-2 text-xs font-semibold text-[#535b68]">참가자</p>
               <div className="divide-y divide-[#e4e7ec] border-y border-[#e4e7ec]">
-                {selectedParty.members.map((member) => <div key={member.id} className="flex items-center justify-between gap-3 py-2.5 text-sm"><p className="min-w-0 truncate font-semibold">{member.nickname} <span className="font-normal text-[#7a818d]">Lv.{member.characterLevel}</span></p><div className="flex items-center gap-2"><span className="font-bold tabular-nums">{rateLabel(member.verifiedRate)}</span>{member.role === 'leader' && <Badge variant="outline" className="rounded-sm border-amber-200 bg-amber-50 text-amber-700">파티장</Badge>}</div></div>)}
+                {selectedParty.members.map((member) => {
+                  const characterImage = member.nickname === profile.nickname ? profile.image ?? member.characterImage : member.characterImage;
+                  return <div key={member.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={56} height={56} className="size-14 shrink-0 rounded-md bg-[#f3f5f7] object-contain object-bottom" /> : <div className="grid size-14 shrink-0 place-items-center rounded-md bg-[#f1f3f5] text-[#8a919d]"><CircleUserRound className="size-6" /></div>}
+                      <p className="min-w-0 truncate font-semibold">{member.nickname} <span className="font-normal text-[#7a818d]">Lv.{member.characterLevel}</span></p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2"><span className="font-bold tabular-nums">{rateLabel(member.verifiedRate)}</span>{member.role === 'leader' && <Badge variant="outline" className="rounded-sm border-amber-200 bg-amber-50 text-amber-700">파티장</Badge>}</div>
+                  </div>;
+                })}
               </div>
             </div>
             <div className={`rounded-md border px-3 py-2 text-xs ${canJoin ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-[#dfe2e8] bg-[#fafbfc] text-[#687080]'}`}>

@@ -17,6 +17,7 @@ type PartyRow = {
   status: 'open' | 'full' | 'cancelled';
   created_at: string;
   member_count: number;
+  total_rate: number;
 };
 
 type MemberRow = {
@@ -25,6 +26,7 @@ type MemberRow = {
   nickname: string;
   character_class: string;
   character_level: number;
+  character_image: string | null;
   hexa_stat: number;
   verified_rate: number;
   role: 'leader' | 'member';
@@ -52,6 +54,7 @@ function memberFromRow(row: MemberRow): PartyMember {
     nickname: row.nickname,
     characterClass: row.character_class,
     characterLevel: row.character_level,
+    characterImage: row.character_image ?? undefined,
     hexaStat: row.hexa_stat,
     verifiedRate: row.verified_rate,
     role: row.role,
@@ -64,14 +67,14 @@ async function loadParties(partyId?: string) {
   const now = new Date().toISOString();
   const partyQuery = partyId
     ? database.prepare(`
-        SELECT p.*, COUNT(m.id) AS member_count
+        SELECT p.*, COUNT(m.id) AS member_count, COALESCE(SUM(m.verified_rate), 0) AS total_rate
         FROM parties p
         LEFT JOIN party_members m ON m.party_id = p.id
         WHERE p.id = ?
         GROUP BY p.id
       `).bind(partyId)
     : database.prepare(`
-        SELECT p.*, COUNT(m.id) AS member_count
+        SELECT p.*, COUNT(m.id) AS member_count, COALESCE(SUM(m.verified_rate), 0) AS total_rate
         FROM parties p
         LEFT JOIN party_members m ON m.party_id = p.id
         WHERE p.departure_at > ? AND p.status != 'cancelled'
@@ -108,6 +111,7 @@ async function loadParties(partyId?: string) {
     leaderRate: row.leader_rate,
     status: row.member_count >= row.capacity ? 'full' : row.status,
     createdAt: row.created_at,
+    totalRate: row.total_rate,
     members: membersByParty.get(row.id) ?? [],
   }));
 }
@@ -190,11 +194,11 @@ export async function POST(request: Request) {
         database.prepare(`
           INSERT INTO party_members (
             id, party_id, nickname, character_class, character_level,
-            hexa_stat, verified_rate, role, joined_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'leader', ?)
+            character_image, hexa_stat, verified_rate, role, joined_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?)
         `).bind(
           memberId, partyId, nickname, verified.profile.characterClass, verified.profile.level,
-          hexaStat, verified.rate, createdAt,
+          verified.profile.image ?? null, hexaStat, verified.rate, createdAt,
         ),
       ]);
       return Response.json({ party: (await loadParties(partyId))[0] }, { status: 201 });
@@ -224,9 +228,9 @@ export async function POST(request: Request) {
         const result = await database.prepare(`
           INSERT INTO party_members (
             id, party_id, nickname, character_class, character_level,
-            hexa_stat, verified_rate, role, joined_at
+            character_image, hexa_stat, verified_rate, role, joined_at
           )
-          SELECT ?, p.id, ?, ?, ?, ?, ?, 'member', ?
+          SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?
           FROM parties p
           WHERE p.id = ?
             AND p.status = 'open'
@@ -235,7 +239,7 @@ export async function POST(request: Request) {
             AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
         `).bind(
           crypto.randomUUID(), nickname, verified.profile.characterClass, verified.profile.level,
-          hexaStat, verified.rate, joinedAt, partyId, joinedAt, verified.rate,
+          verified.profile.image ?? null, hexaStat, verified.rate, joinedAt, partyId, joinedAt, verified.rate,
         ).run();
         if (!result.meta.changes) throw new PartyRequestError('모집이 마감되었거나 가입 조건이 변경되었습니다.', 409);
       } catch (error) {

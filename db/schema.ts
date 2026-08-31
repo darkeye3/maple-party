@@ -22,6 +22,7 @@ export const createPartyMembersTable = `
     nickname TEXT NOT NULL,
     character_class TEXT NOT NULL,
     character_level INTEGER NOT NULL,
+    character_image TEXT,
     hexa_stat INTEGER NOT NULL,
     verified_rate REAL NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('leader', 'member')),
