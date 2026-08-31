@@ -347,7 +347,7 @@ export function PartyBoard({
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-5xl">
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-lg">
           {selectedParty && <>
             <DialogHeader><DialogTitle>{selectedParty.difficulty} {selectedParty.bossName}</DialogTitle><DialogDescription>{departureLabel(selectedParty.departureAt)} 출발 · 최소 {rateLabel(selectedParty.minimumRate)}</DialogDescription></DialogHeader>
             <div className="grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
@@ -358,23 +358,22 @@ export function PartyBoard({
             </div>
             <div>
               <p className="mb-2 text-xs font-semibold text-[#535b68]">참가자</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {selectedParty.members.map((member) => {
                   const characterImage = member.nickname === profile.nickname ? profile.image ?? member.characterImage : member.characterImage;
-                  return <article key={member.id} className="overflow-hidden rounded-lg border border-[#dfe2e8] bg-white">
-                    <div className="grid h-[300px] place-items-end overflow-hidden bg-[#f3f5f7]">
-                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="size-[300px] max-w-full object-contain object-bottom" /> : <div className="grid size-[300px] max-w-full place-items-center text-[#8a919d]"><CircleUserRound className="size-12" /></div>}
+                  return <article key={member.id} className="rounded-lg border border-[#dfe2e8] bg-white px-3 pb-3.5 pt-4 text-center">
+                    <div className="relative mx-auto size-40 overflow-hidden rounded-full border border-[#d8dce2] bg-[#f3f5f7]">
+                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="absolute left-1/2 top-1/2 size-[300px] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain" /> : <div className="grid size-full place-items-center text-[#8a919d]"><CircleUserRound className="size-10" /></div>}
                     </div>
-                    <div className="border-t border-[#e3e6eb] p-3.5">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="pt-3">
+                      <div className="flex items-center justify-center gap-2">
                         <h3 className="min-w-0 truncate text-base font-bold">{member.nickname}</h3>
                         {member.role === 'leader' && <Badge variant="outline" className="shrink-0 rounded-sm border-amber-200 bg-amber-50 text-amber-700">파티장</Badge>}
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-[#eceef1] pt-3">
-                        <div><p className="text-[10px] text-[#818894]">직업</p><p className="mt-0.5 text-xs font-semibold">{member.characterClass}</p></div>
-                        <div><p className="text-[10px] text-[#818894]">레벨</p><p className="mt-0.5 text-xs font-semibold tabular-nums">Lv.{member.characterLevel}</p></div>
-                        <div><p className="text-[10px] text-[#818894]">헥환</p><p className="mt-0.5 text-xs font-semibold tabular-nums">{member.hexaStat.toLocaleString()}</p></div>
-                        <div><p className="text-[10px] text-[#818894]">보스 배율</p><p className="mt-0.5 text-xs font-bold tabular-nums text-[#1f5ed5]">{rateLabel(member.verifiedRate)}</p></div>
+                      <p className="mt-1 text-xs text-[#747b88]">{member.characterClass} · Lv.{member.characterLevel}</p>
+                      <div className="mt-3 space-y-1.5 border-t border-[#eceef1] pt-3 text-xs">
+                        <div className="flex items-center justify-between gap-3"><span className="text-[#818894]">헥환</span><strong className="tabular-nums">{member.hexaStat.toLocaleString()}</strong></div>
+                        <div className="flex items-center justify-between gap-3"><span className="text-[#818894]">보스 배율</span><strong className="tabular-nums text-[#1f5ed5]">{rateLabel(member.verifiedRate)}</strong></div>
                       </div>
                     </div>
                   </article>;
