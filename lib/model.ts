@@ -17,7 +17,30 @@ export type CharacterProfile = {
   hexaStatCoreCount?: number;
   dataDate?: string;
   bestCondition?: BestCondition;
+  calculationProfile?: CharacterCalculationProfile;
   source: 'reference' | 'nexon';
+};
+
+export type AuthenticRegion = 'seren' | 'kalos' | 'adversary' | 'kaling' | 'malefic' | 'limbo' | 'bardrix' | 'jupiter';
+
+export type CharacterCalculationProfile = {
+  mainStat: number;
+  magicAttack: number;
+  finalDamage: number;
+  statusDamage: number;
+  buffDuration: number;
+  cooldownReductionSeconds: number;
+  cooldownReductionPercent: number;
+  ringLevel: number;
+  symbolLevels: Partial<Record<AuthenticRegion, number>>;
+  hexa: {
+    skillAverage: number;
+    masteryAverage: number;
+    enhancementAverage: number;
+    commonAverage: number;
+    originLevel: number;
+    statLevelTotal: number;
+  };
 };
 
 export type BossStatus = {
@@ -49,6 +72,7 @@ export type BossResult = BossDefinition & {
   status: BossStatus;
   levelMultiplier: number;
   forceMultiplier: number;
+  symbolMultiplier: number;
 };
 
 export type EngineBreakdown = {
@@ -67,6 +91,9 @@ export type EngineBreakdown = {
   proficiency: number;
   classFinalDamage: number;
   ignoreElementalResistance: number;
+  curveExponent300: number;
+  curveExponent380: number;
+  maxAuthenticSymbols: number;
 };
 
 export type EngineSummary = {
@@ -79,9 +106,8 @@ export type EngineSummary = {
 };
 
 export const REFERENCE_HEXA = 83_583;
-export const ENGINE_VERSION = 'Bishop Boss Table 2026.08 v3';
+export const ENGINE_VERSION = 'Bishop Character Curve 2026.08 v4';
 export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-08-15';
-export const BISHOP_CALIBRATION_LABEL = '비숍 관측값 40,618 · 83,583 이중 보정';
 
 export const REFERENCE_PROFILE: CharacterProfile = {
   nickname: '팸귄',
@@ -103,27 +129,6 @@ const BISHOP_KALING_DAMAGE_RATIO = 0.9739554098846646;
 const BISHOP_HEXA_CORRECTION_300 = 0.920501595616958;
 const BISHOP_HEXA_CORRECTION_380 = 0.934129464251163;
 const BISHOP_ASCENT_CONSTANT = 0.01079042910864958;
-const BISHOP_OBSERVED_HEXA = 40_618;
-
-type BishopObservedCorrection = {
-  damage: number;
-  rate: number;
-};
-
-const BISHOP_OBSERVED_CORRECTIONS: Record<string, BishopObservedCorrection> = {
-  'destiny-seren': { damage: 1, rate: 1.01747946 },
-  'normal-kaling': { damage: 0.983851952, rate: 1.019596464 },
-  'normal-malefic': { damage: 1.01882, rate: 1.02507535 },
-  'extreme-lotus': { damage: 1.025816871, rate: 1.011645056 },
-  'champion-kalos': { damage: 0.999709801, rate: 1.016740775 },
-  'normal-adversary': { damage: 0.999709801, rate: 1.018229982 },
-  'normal-kalos': { damage: 0.999709801, rate: 1.016763495 },
-  'easy-bellona': { damage: 1.01882, rate: 1.02788118 },
-  'champion-seren': { damage: 1, rate: 1.017607638 },
-  'easy-kaling': { damage: 0.978719762, rate: 1.017970231 },
-  'hard-seren': { damage: 1, rate: 1.01747946 },
-  'easy-adversary': { damage: 1, rate: 1.017689416 },
-};
 
 export const BISHOP_CLASS_MODEL = {
   weaponConstant: 1.2,
@@ -254,23 +259,103 @@ function combatContext(profile: CharacterProfile, boss: BossDefinition) {
   return { level, force, total: level * force };
 }
 
-function bishopReferenceStat(boss: BossDefinition) {
-  if (boss.name === '카링') return 82_675;
+function bishopReferenceStat(boss: BossDefinition, profile: CharacterProfile) {
   if (boss.name === '검은 마법사') return 79_883;
+  if (profile.source === 'nexon') return REFERENCE_HEXA;
+  if (boss.name === '카링') return 82_675;
   if (['벨로나', '림보', '흉성', '스우'].includes(boss.name)) return 82_888;
   return REFERENCE_HEXA;
 }
 
-function bishopObservedCorrection(boss: BossDefinition, hexaStat: number) {
-  const observed = BISHOP_OBSERVED_CORRECTIONS[boss.id];
-  if (!observed) return { damage: 1, rate: 1 };
-  const weight = Math.min(1, Math.max(0,
-    (REFERENCE_HEXA - hexaStat) / (REFERENCE_HEXA - BISHOP_OBSERVED_HEXA),
-  ));
-  return {
-    damage: 1 + (observed.damage - 1) * weight,
-    rate: 1 + (observed.rate - 1) * weight,
-  };
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function profileCurveExponent(profile: CharacterProfile, guard: 300 | 380) {
+  const calculation = profile.calculationProfile;
+  if (!calculation) return 1;
+
+  const damagePool = Math.max(1, 100 + profile.damage + profile.bossDamage + calculation.statusDamage);
+  const referenceDamagePool = 100 + REFERENCE_PROFILE.damage + REFERENCE_PROFILE.bossDamage;
+  const criticalExpectation = 1 + clamp(profile.criticalRate, 0, 100) / 100 * (0.35 + profile.criticalDamage / 100);
+  const referenceCriticalExpectation = 1 + (0.35 + REFERENCE_PROFILE.criticalDamage / 100);
+  const defenseRatio = bishopDefenseConstant(profile.ignoreDefense, guard)
+    / bishopDefenseConstant(REFERENCE_PROFILE.ignoreDefense, guard);
+  const hexaLevels = [
+    calculation.hexa.skillAverage,
+    calculation.hexa.masteryAverage,
+    calculation.hexa.enhancementAverage,
+    calculation.hexa.commonAverage,
+  ].filter((level) => level > 0);
+  const hexaAverage = hexaLevels.length
+    ? hexaLevels.reduce((total, level) => total + level, 0) / hexaLevels.length
+    : 20;
+  const hexaBalance = clamp((hexaAverage - 20) / 40, -0.5, 0.5);
+  const profileShift = Math.log(clamp(damagePool / referenceDamagePool, 0.7, 1.4)) * 0.012
+    + Math.log(clamp(criticalExpectation / referenceCriticalExpectation, 0.8, 1.2)) * 0.018
+    + Math.log(clamp(defenseRatio, 0.8, 1.2)) * (guard === 380 ? 0.012 : 0.009)
+    + hexaBalance * 0.004;
+  return clamp(1 + profileShift, 0.985, 1.015);
+}
+
+function curveValue(spline: Spline, value: number, profile: CharacterProfile, guard: 300 | 380) {
+  const raw = splineValue(spline, value);
+  if (raw <= 0 || value <= 0) return raw;
+  const exponent = profileCurveExponent(profile, guard);
+  return raw * Math.pow(value / REFERENCE_HEXA, exponent - 1);
+}
+
+function inverseCurve(spline: Spline, target: number, profile: CharacterProfile, guard: 300 | 380) {
+  let low = 0;
+  let high = 250_000;
+  for (let iteration = 0; iteration < 40; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (curveValue(spline, middle, profile, guard) < target) low = middle;
+    else high = middle;
+  }
+  return Math.round((low + high) / 2);
+}
+
+function bishopKalingMultiplier(profile: CharacterProfile) {
+  const calculation = profile.calculationProfile;
+  if (!calculation) return BISHOP_KALING_DAMAGE_RATIO;
+  const { hexa } = calculation;
+  const burst = 0.65 * hexa.skillAverage + 0.35 * hexa.originLevel;
+  const sustained = 0.45 * hexa.masteryAverage + 0.35 * hexa.enhancementAverage + 0.2 * hexa.commonAverage;
+  const measuredLevels = [burst, sustained].filter((level) => level > 0);
+  if (!measuredLevels.length) return BISHOP_KALING_DAMAGE_RATIO;
+  const scale = Math.max(10, measuredLevels.reduce((total, level) => total + level, 0) / measuredLevels.length);
+  const coreBalance = clamp((sustained - burst) / scale, -1, 1);
+  const cooldownBonus = clamp(
+    calculation.cooldownReductionSeconds / 12 + calculation.cooldownReductionPercent / 30,
+    0,
+    1,
+  );
+  return clamp(BISHOP_KALING_DAMAGE_RATIO * (1 + coreBalance * 0.008 + cooldownBonus * 0.002), 0.96, 0.99);
+}
+
+const bossRegions: Partial<Record<string, AuthenticRegion>> = {
+  '선택받은 세렌': 'seren',
+  '감시자 칼로스': 'kalos',
+  '대적자': 'adversary',
+  '카링': 'kaling',
+  '흉성': 'malefic',
+  '벨로나': 'malefic',
+  '림보': 'limbo',
+  '발드릭스': 'bardrix',
+  '유피테르': 'jupiter',
+};
+
+function authenticSymbolMultiplier(profile: CharacterProfile, boss: BossDefinition, summary: EngineSummary) {
+  const symbolLevels = profile.calculationProfile?.symbolLevels;
+  const region = bossRegions[boss.name];
+  if (!symbolLevels || !region) return 1;
+  const levels = Object.values(symbolLevels);
+  if (!levels.some((level) => level === 11) || symbolLevels[region] === 11) return 1;
+  return summary.calculatedHexaDamage300
+    / summary.breakdown.defenseConstant300
+    * summary.breakdown.defenseConstant380
+    / Math.max(summary.calculatedHexaDamage380, Number.EPSILON);
 }
 
 export function composeIgnoreDefense(lines: number[]) {
@@ -317,8 +402,8 @@ export function calculateEngineSummary(hexaStat: number, profile: CharacterProfi
   const offenseMultiplier = condition?.multiplier ?? 1;
   const defenseMultiplier300 = condition?.defenseMultiplier300 ?? 1;
   const defenseMultiplier380 = condition?.defenseMultiplier380 ?? 1;
-  const rawCurveDamage300 = splineValue(spline300, safeHexa);
-  const rawCurveDamage380 = splineValue(spline380, safeHexa);
+  const rawCurveDamage300 = curveValue(spline300, safeHexa, profile, 300);
+  const rawCurveDamage380 = curveValue(spline380, safeHexa, profile, 380);
   const calculatedHexaDamage300 = rawCurveDamage300
     * BISHOP_HEXA_CORRECTION_300
     * offenseMultiplier
@@ -327,12 +412,14 @@ export function calculateEngineSummary(hexaStat: number, profile: CharacterProfi
     * BISHOP_HEXA_CORRECTION_380
     * offenseMultiplier
     * defenseMultiplier380;
+  const kalingMultiplier = bishopKalingMultiplier(profile);
+  const symbolLevels = Object.values(profile.calculationProfile?.symbolLevels ?? {});
   return {
     calculatedHexaDamage300,
     calculatedHexaDamage380,
-    calculatedHexaDamageKaling: calculatedHexaDamage380 * BISHOP_KALING_DAMAGE_RATIO,
-    boss300HexaStat: inverseSpline(spline300, calculatedHexaDamage300),
-    boss380HexaStat: inverseSpline(spline380, calculatedHexaDamage380),
+    calculatedHexaDamageKaling: calculatedHexaDamage380 * kalingMultiplier,
+    boss300HexaStat: inverseCurve(spline300, calculatedHexaDamage300, profile, 300),
+    boss380HexaStat: inverseCurve(spline380, calculatedHexaDamage380, profile, 380),
     breakdown: {
       version: ENGINE_VERSION,
       rawCurveDamage300,
@@ -344,17 +431,20 @@ export function calculateEngineSummary(hexaStat: number, profile: CharacterProfi
       presetDefenseMultiplier380: defenseMultiplier380,
       defenseConstant300: bishopDefenseConstant(baseIgnoreDefense, 300),
       defenseConstant380: bishopDefenseConstant(baseIgnoreDefense, 380),
-      kalingMultiplier: BISHOP_KALING_DAMAGE_RATIO,
+      kalingMultiplier,
       weaponConstant: BISHOP_CLASS_MODEL.weaponConstant,
       proficiency: BISHOP_CLASS_MODEL.proficiency,
       classFinalDamage: BISHOP_CLASS_MODEL.finalDamage,
       ignoreElementalResistance: BISHOP_CLASS_MODEL.ignoreElementalResistance,
+      curveExponent300: profileCurveExponent(profile, 300),
+      curveExponent380: profileCurveExponent(profile, 380),
+      maxAuthenticSymbols: symbolLevels.filter((level) => level === 11).length,
     },
   };
 }
 
 export function calculateBosses(hexaStat: number, profile: CharacterProfile): BossResult[] {
-  const reference = calculateEngineSummary(REFERENCE_HEXA, REFERENCE_PROFILE);
+  const profileReference = calculateEngineSummary(REFERENCE_HEXA, { ...profile, bestCondition: undefined });
   const input = calculateEngineSummary(hexaStat, profile);
   return bosses.map((boss) => {
     const guardSpline = boss.guard === 300 ? spline300 : spline380;
@@ -363,11 +453,11 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
       : boss.guard === 300
         ? input.calculatedHexaDamage300
         : input.calculatedHexaDamage380;
-    const referenceDamage = boss.name === '카링'
-      ? reference.calculatedHexaDamageKaling
-      : boss.guard === 300
-        ? reference.calculatedHexaDamage300
-        : reference.calculatedHexaDamage380;
+    const referenceDamage = boss.guard === 300
+      ? profileReference.calculatedHexaDamage300
+      : boss.name === '카링' && profile.source === 'reference'
+        ? profileReference.calculatedHexaDamageKaling
+        : profileReference.calculatedHexaDamage380;
     const context = combatContext(profile, boss);
     const referenceContext = combatContext(REFERENCE_PROFILE, boss);
     const forceNormalizer = boss.authenticForce
@@ -376,18 +466,19 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
         ? boss.name === '검은 마법사' ? 1.1 : 1.5
         : 1;
     const referenceAdjustedDamage = referenceDamage * referenceContext.total / (1.2 * forceNormalizer);
-    const specEfficiency = splineValue(guardSpline, bishopReferenceStat(boss)) / referenceAdjustedDamage;
-    const observation = bishopObservedCorrection(boss, hexaStat);
+    const specEfficiency = curveValue(guardSpline, bishopReferenceStat(boss, profile), profile, boss.guard)
+      / referenceAdjustedDamage;
+    const symbolMultiplier = authenticSymbolMultiplier(profile, boss, input);
     const adjustedDamage = inputDamage * context.total / (1.2 * forceNormalizer)
       * specEfficiency
-      * observation.damage;
+      * symbolMultiplier;
     const cutoff = boss.partyBossCut ?? boss.bossCut ?? 1;
-    const cutoffDamage = splineValue(guardSpline, cutoff);
-    const baseClearRate = adjustedDamage / cutoffDamage * boss.easyRate * observation.rate;
+    const cutoffDamage = curveValue(guardSpline, cutoff, profile, boss.guard);
+    const baseClearRate = adjustedDamage / cutoffDamage * boss.easyRate;
     const ascentDivisor = Math.min(3, Math.ceil(20 / Math.max(baseClearRate, Number.EPSILON) / 5.667));
     const ascentCorrection = 3 * BISHOP_ASCENT_CONSTANT / ascentDivisor - BISHOP_ASCENT_CONSTANT;
     const rate = baseClearRate * (1 + ascentCorrection) * 100;
-    const cardStat = inverseSpline(guardSpline, adjustedDamage);
+    const cardStat = inverseCurve(guardSpline, adjustedDamage, profile, boss.guard);
     return {
       ...boss,
       rate,
@@ -395,6 +486,7 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
       status: statusFor(rate, boss),
       levelMultiplier: context.level,
       forceMultiplier: context.force,
+      symbolMultiplier,
     };
   });
 }

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { BISHOP_CALIBRATION_LABEL, BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
+import { BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'range' | 'all' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
@@ -75,6 +75,7 @@ export default function Home() {
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
   const exactAnchor = hexa === REFERENCE_HEXA && profile.source === 'reference';
+  const profileMatchesNickname = nickname.trim() === profile.nickname;
   const engine = useMemo(() => calculateEngineSummary(hexa, profile), [hexa, profile]);
   const results = useMemo(() => {
     const calculated = calculateBosses(hexa, profile);
@@ -110,8 +111,9 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error ?? '캐릭터 정보를 불러오지 못했습니다.');
       setProfile(data as CharacterProfile);
       setNoticeKind('success');
+      const maxSymbols = Object.values(data.calculationProfile?.symbolLevels ?? {}).filter((level) => level === 11).length;
       setNotice(data.source === 'nexon'
-        ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종과 HEXA 코어 ${data.hexaCoreCount ?? 0}개를 확인해 계산했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}${data.dataDate ? ` 기준일 ${data.dataDate.slice(0, 10)}` : ''}`
+        ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종, HEXA 코어 ${data.hexaCoreCount ?? 0}개, 최고레벨 지역 심볼 ${maxSymbols}개를 적용했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}${data.dataDate ? ` 기준일 ${data.dataDate.slice(0, 10)}` : ''}`
         : '저장된 기준 스냅샷으로 계산했습니다.');
     } catch (error) {
       setNoticeKind('error');
@@ -124,6 +126,14 @@ export default function Home() {
   async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     await loadCharacter();
+  }
+
+  function handleNicknameChange(value: string) {
+    setNickname(value);
+    if (value.trim() !== profile.nickname) {
+      setNoticeKind('info');
+      setNotice(`현재 결과는 ${profile.nickname} 기준입니다. 계산하기를 눌러 새 캐릭터 정보를 불러오세요.`);
+    }
   }
 
   async function handleApiKeySave(event: SyntheticEvent<HTMLFormElement>) {
@@ -188,7 +198,7 @@ export default function Home() {
                 <label className="relative" htmlFor="character-name">
                   <span className="sr-only">캐릭터 닉네임</span>
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a919d]" />
-                  <Input id="character-name" value={nickname} onChange={(event) => setNickname(event.target.value)} className="h-11 rounded-md border-[#ccd1d9] pl-9" placeholder="캐릭터 닉네임" />
+                  <Input id="character-name" value={nickname} onChange={(event) => handleNicknameChange(event.target.value)} className="h-11 rounded-md border-[#ccd1d9] pl-9" placeholder="캐릭터 닉네임" />
                 </label>
                 <label className="relative" htmlFor="hexa-stat">
                   <span className="sr-only">헥사환산</span>
@@ -199,7 +209,7 @@ export default function Home() {
                   <Calculator className="size-4" /> {loading ? '조회 중' : '계산하기'}
                 </Button>
               </form>
-              <p className={`mt-2 min-h-7 rounded-md px-2.5 py-1.5 text-xs font-medium ${noticeKind === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : noticeKind === 'success' ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'text-[#687080]'}`} aria-live="polite">{notice}</p>
+              <p className={`mt-2 min-h-7 rounded-md px-2.5 py-1.5 text-xs font-medium ${noticeKind === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : noticeKind === 'success' ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : !profileMatchesNickname ? 'border border-amber-200 bg-amber-50 text-amber-800' : 'text-[#687080]'}`} aria-live="polite">{notice}</p>
             </div>
           </section>
 
@@ -278,7 +288,7 @@ export default function Home() {
                       <p className="truncate text-[11px] font-bold uppercase text-[#d85432]">{boss.difficulty}</p>
                       <h2 className="mt-0.5 min-h-10 text-sm font-bold leading-5">{boss.name}</h2>
                       <p className="text-[11px] text-[#7b828d]">Lv.{boss.level} · 최대 {boss.partyLimit}인</p>
-                      <p className="mt-0.5 text-[10px] tabular-nums text-[#9096a0]">레벨 ×{boss.levelMultiplier.toFixed(2)} · 포스 ×{boss.forceMultiplier.toFixed(2)}</p>
+                      <p className="mt-0.5 text-[10px] tabular-nums text-[#9096a0]">레벨 ×{boss.levelMultiplier.toFixed(2)} · 포스 ×{boss.forceMultiplier.toFixed(2)}{boss.symbolMultiplier !== 1 ? ` · 심볼 ×${boss.symbolMultiplier.toFixed(3)}` : ''}</p>
                     </div>
                   </div>
                   <div className="mt-3 flex items-end justify-between border-t border-[#e5e7eb] pt-3">
@@ -322,7 +332,8 @@ export default function Home() {
           <div className="divide-y divide-[#e4e7ec] border-y border-[#e4e7ec] text-sm">
             {[
               ['보스 보정표', BOSS_TABLE_VERSION, '보스컷 · 난이도 계수 · 파티 전용 컷'],
-              ['비숍 관측 보정', BISHOP_CALIBRATION_LABEL, '두 검증점 사이를 연속 보간'],
+              ['캐릭터 곡선', `300 ${engine.breakdown.curveExponent300.toFixed(6)} · 380 ${engine.breakdown.curveExponent380.toFixed(6)}`, '입력 헥환 기준점에 고정한 캐릭터별 곡률'],
+              ['지역 심볼', `최고 레벨 ${engine.breakdown.maxAuthenticSymbols}개`, '보스 지역과 연결된 어센틱심볼 Lv.11 보정'],
               ['300 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage300), `HEXA 보정 ×${engine.breakdown.hexaCorrection300.toFixed(6)}`],
               ['380 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage380), `HEXA 보정 ×${engine.breakdown.hexaCorrection380.toFixed(6)}`],
               ['프리셋 실전딜', `×${engine.breakdown.presetOffenseMultiplier.toFixed(6)}`, `방무 300 ×${engine.breakdown.presetDefenseMultiplier300.toFixed(6)} · 380 ×${engine.breakdown.presetDefenseMultiplier380.toFixed(6)}`],
