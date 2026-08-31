@@ -13,6 +13,7 @@ import { calculateBosses, CharacterProfile, formatRate, REFERENCE_HEXA, REFERENC
 
 type Filter = 'all' | 'challenge' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
+type NoticeKind = 'info' | 'success' | 'error';
 
 const filters: Array<{ value: Filter; label: string }> = [
   { value: 'all', label: '전체' },
@@ -44,6 +45,7 @@ export default function Home() {
   const [sort, setSort] = useState<Sort>('site');
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('팸귄 비숍의 83,583 스크린샷을 기준점으로 계산했습니다.');
+  const [noticeKind, setNoticeKind] = useState<NoticeKind>('info');
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
 
@@ -67,8 +69,14 @@ export default function Home() {
   }, [filter, hexa, profile, sort]);
 
   async function loadCharacter(key = apiKey) {
-    if (!nickname.trim()) return setNotice('닉네임을 입력해 주세요.');
-    if (!hexa) return setNotice('헥사환산 값을 입력해 주세요.');
+    if (!nickname.trim()) {
+      setNoticeKind('error');
+      return setNotice('닉네임을 입력해 주세요.');
+    }
+    if (!hexa) {
+      setNoticeKind('error');
+      return setNotice('헥사환산 값을 입력해 주세요.');
+    }
     setLoading(true);
     try {
       const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}`, {
@@ -78,10 +86,12 @@ export default function Home() {
       if (data.code === 'API_KEY_REQUIRED') setApiDialogOpen(true);
       if (!response.ok) throw new Error(data.error ?? '캐릭터 정보를 불러오지 못했습니다.');
       setProfile(data as CharacterProfile);
+      setNoticeKind('success');
       setNotice(data.source === 'nexon'
         ? `${data.characterClass === '비숍' ? '넥슨 Open API 정보로 계산했습니다.' : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}`
         : '저장된 기준 스냅샷으로 계산했습니다.');
     } catch (error) {
+      setNoticeKind('error');
       setNotice(error instanceof Error ? error.message : '조회 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
@@ -101,7 +111,10 @@ export default function Home() {
     else sessionStorage.removeItem('nexon-open-api-key');
     setApiDialogOpen(false);
     if (trimmedKey) await loadCharacter(trimmedKey);
-    else setNotice('NEXON Open API 연결을 해제했습니다.');
+    else {
+      setNoticeKind('info');
+      setNotice('NEXON Open API 연결을 해제했습니다.');
+    }
   }
 
   return (
@@ -160,7 +173,7 @@ export default function Home() {
                   <Calculator className="size-4" /> {loading ? '조회 중' : '계산하기'}
                 </Button>
               </form>
-              <p className="mt-2 min-h-5 text-xs text-[#687080]" aria-live="polite">{notice}</p>
+              <p className={`mt-2 min-h-7 rounded-md px-2.5 py-1.5 text-xs font-medium ${noticeKind === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : noticeKind === 'success' ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'text-[#687080]'}`} aria-live="polite">{notice}</p>
             </div>
           </section>
 
@@ -236,7 +249,7 @@ export default function Home() {
               공식 API 키 발급 <ExternalLink className="size-3" />
             </a>
             <DialogFooter className="mt-1 rounded-b-lg">
-              <Button type="button" variant="outline" onClick={() => { setApiKey(''); sessionStorage.removeItem('nexon-open-api-key'); setApiDialogOpen(false); setNotice('NEXON Open API 연결을 해제했습니다.'); }} className="rounded-md">연결 해제</Button>
+              <Button type="button" variant="outline" onClick={() => { setApiKey(''); sessionStorage.removeItem('nexon-open-api-key'); setApiDialogOpen(false); setNoticeKind('info'); setNotice('NEXON Open API 연결을 해제했습니다.'); }} className="rounded-md">연결 해제</Button>
               <Button type="submit" className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">저장 후 조회</Button>
             </DialogFooter>
           </form>
