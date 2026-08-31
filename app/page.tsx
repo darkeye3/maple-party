@@ -9,15 +9,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
+import { BISHOP_CALIBRATION_LABEL, BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
-type Filter = 'all' | 'challenge' | 'solo';
+type Filter = 'range' | 'all' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
 type NoticeKind = 'info' | 'success' | 'error';
 
 const filters: Array<{ value: Filter; label: string }> = [
+  { value: 'range', label: '내 기준' },
   { value: 'all', label: '전체' },
-  { value: 'challenge', label: '도전권' },
   { value: 'solo', label: '솔플권' },
 ];
 
@@ -59,10 +59,10 @@ export default function Home() {
   const [nickname, setNickname] = useState(REFERENCE_PROFILE.nickname);
   const [hexaInput, setHexaInput] = useState(String(REFERENCE_HEXA));
   const [profile, setProfile] = useState<CharacterProfile>(REFERENCE_PROFILE);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<Filter>('range');
   const [sort, setSort] = useState<Sort>('site');
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState('2026-08 기준 비숍 300·380 독립 계산 엔진을 적용했습니다.');
+  const [notice, setNotice] = useState('2026-08-15 보스컷 표와 실제 스플라인 배율식을 적용했습니다.');
   const [noticeKind, setNoticeKind] = useState<NoticeKind>('info');
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
@@ -79,7 +79,10 @@ export default function Home() {
   const results = useMemo(() => {
     const calculated = calculateBosses(hexa, profile);
     const filtered = calculated.filter((boss) => {
-      if (filter === 'challenge') return boss.rate < 110;
+      if (filter === 'range') {
+        const minimumRate = boss.partyBoss ? 85 / boss.partyLimit : 15;
+        return boss.rate >= minimumRate && boss.rate <= 1000;
+      }
       if (filter === 'solo') return boss.rate >= 90;
       return true;
     });
@@ -173,11 +176,11 @@ export default function Home() {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-[#687080]">
                   <ShieldCheck className="size-4 text-emerald-600" />
-                  {exactAnchor ? '83,583 검증값과 일치' : ENGINE_VERSION}
+                  {exactAnchor ? '83,583 피해량 기준 검증' : ENGINE_VERSION}
                   <TooltipTrigger className="ml-0.5 grid size-6 place-items-center rounded-md hover:bg-[#f1f3f5]" aria-label="계산 기준 설명">
                     <CircleHelp className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent className="max-w-72">300·380 독립 스플라인, 비숍 방무 합성, 레벨·포스 배율과 카링 보정을 순서대로 적용합니다.</TooltipContent>
+                  <TooltipContent className="max-w-72">보스별 컷을 300·380 스플라인 피해량으로 변환한 뒤 레벨·포스, 카링 피해량과 난이도 계수를 순서대로 적용합니다.</TooltipContent>
                 </div>
               </div>
 
@@ -318,6 +321,8 @@ export default function Home() {
           </DialogHeader>
           <div className="divide-y divide-[#e4e7ec] border-y border-[#e4e7ec] text-sm">
             {[
+              ['보스 보정표', BOSS_TABLE_VERSION, '보스컷 · 난이도 계수 · 파티 전용 컷'],
+              ['비숍 관측 보정', BISHOP_CALIBRATION_LABEL, '두 검증점 사이를 연속 보간'],
               ['300 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage300), `HEXA 보정 ×${engine.breakdown.hexaCorrection300.toFixed(6)}`],
               ['380 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage380), `HEXA 보정 ×${engine.breakdown.hexaCorrection380.toFixed(6)}`],
               ['프리셋 실전딜', `×${engine.breakdown.presetOffenseMultiplier.toFixed(6)}`, `방무 300 ×${engine.breakdown.presetDefenseMultiplier300.toFixed(6)} · 380 ×${engine.breakdown.presetDefenseMultiplier380.toFixed(6)}`],

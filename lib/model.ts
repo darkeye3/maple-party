@@ -36,8 +36,9 @@ type BossDefinition = {
   arcaneForce?: number;
   authenticForce?: number;
   partyLimit: 1 | 2 | 3 | 6;
-  anchorRate: number;
-  anchorStat: number;
+  bossCut?: number;
+  partyBossCut?: number;
+  easyRate: number;
   guard: 300 | 380;
   partyBoss?: boolean;
 };
@@ -78,7 +79,9 @@ export type EngineSummary = {
 };
 
 export const REFERENCE_HEXA = 83_583;
-export const ENGINE_VERSION = 'Bishop Modern 2026.08 v2';
+export const ENGINE_VERSION = 'Bishop Boss Table 2026.08 v3';
+export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-08-15';
+export const BISHOP_CALIBRATION_LABEL = '비숍 관측값 40,618 · 83,583 이중 보정';
 
 export const REFERENCE_PROFILE: CharacterProfile = {
   nickname: '팸귄',
@@ -99,6 +102,28 @@ const BISHOP_ADDITIONAL_IGNORE_DEFENSE = 0.693727598412758;
 const BISHOP_KALING_DAMAGE_RATIO = 0.9739554098846646;
 const BISHOP_HEXA_CORRECTION_300 = 0.920501595616958;
 const BISHOP_HEXA_CORRECTION_380 = 0.934129464251163;
+const BISHOP_ASCENT_CONSTANT = 0.01079042910864958;
+const BISHOP_OBSERVED_HEXA = 40_618;
+
+type BishopObservedCorrection = {
+  damage: number;
+  rate: number;
+};
+
+const BISHOP_OBSERVED_CORRECTIONS: Record<string, BishopObservedCorrection> = {
+  'destiny-seren': { damage: 1, rate: 1.01747946 },
+  'normal-kaling': { damage: 0.983851952, rate: 1.019596464 },
+  'normal-malefic': { damage: 1.01882, rate: 1.02507535 },
+  'extreme-lotus': { damage: 1.025816871, rate: 1.011645056 },
+  'champion-kalos': { damage: 0.999709801, rate: 1.016740775 },
+  'normal-adversary': { damage: 0.999709801, rate: 1.018229982 },
+  'normal-kalos': { damage: 0.999709801, rate: 1.016763495 },
+  'easy-bellona': { damage: 1.01882, rate: 1.02788118 },
+  'champion-seren': { damage: 1, rate: 1.017607638 },
+  'easy-kaling': { damage: 0.978719762, rate: 1.017970231 },
+  'hard-seren': { damage: 1, rate: 1.01747946 },
+  'easy-adversary': { damage: 1, rate: 1.017689416 },
+};
 
 export const BISHOP_CLASS_MODEL = {
   weaponConstant: 1.2,
@@ -120,35 +145,35 @@ const spline380: Spline = {
 };
 
 const bosses: BossDefinition[] = [
-  { id: 'extreme-kaling', name: '카링', difficulty: '익스트림', image: '/bosses/extreme_kaling.png', level: 285, authenticForce: 480, partyLimit: 6, anchorRate: 47.3757103246, anchorStat: 82675, guard: 380, partyBoss: true },
-  { id: 'extreme-kalos', name: '감시자 칼로스', difficulty: '익스트림', image: '/bosses/extreme_kalos.png', level: 285, authenticForce: 440, partyLimit: 6, anchorRate: 18.62, anchorStat: 83583, guard: 380 },
-  { id: 'hard-bellona', name: '벨로나', difficulty: '하드', level: 280, authenticForce: 550, partyLimit: 3, anchorRate: 25.93, anchorStat: 82888, guard: 380 },
-  { id: 'destiny-limbo', name: '림보', difficulty: '데스티니', image: '/bosses/destiny_limbo.png', level: 285, authenticForce: 500, partyLimit: 1, anchorRate: 31.77, anchorStat: 82888, guard: 380 },
-  { id: 'hard-limbo', name: '림보', difficulty: '하드', image: '/bosses/hard_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, anchorRate: 31.77, anchorStat: 82888, guard: 380 },
-  { id: 'hard-malefic', name: '악몽선경', difficulty: '하드', image: '/bosses/hard_maleficStar.png', level: 280, authenticForce: 550, partyLimit: 3, anchorRate: 33.29, anchorStat: 82888, guard: 380 },
-  { id: 'destiny-adversary', name: '찬란한 흉성', difficulty: '데스티니', image: '/bosses/destiny_adversary.png', level: 285, authenticForce: 340, partyLimit: 1, anchorRate: 37.34, anchorStat: 83583, guard: 380 },
-  { id: 'hard-adversary', name: '찬란한 흉성', difficulty: '하드', image: '/bosses/hard_adversary.png', level: 285, authenticForce: 340, partyLimit: 3, anchorRate: 46.68, anchorStat: 83583, guard: 380 },
-  { id: 'hard-kaling', name: '카링', difficulty: '하드', image: '/bosses/hard_kaling.png', level: 285, authenticForce: 350, partyLimit: 6, anchorRate: 48.92, anchorStat: 82675, guard: 380 },
-  { id: 'extreme-seren', name: '선택받은 세렌', difficulty: '익스트림', image: '/bosses/extreme_seren.png', level: 280, authenticForce: 200, partyLimit: 6, anchorRate: 50.39, anchorStat: 83583, guard: 380 },
-  { id: 'extreme-black-mage', name: '검은 마법사', difficulty: '익스트림', image: '/bosses/extreme_blackMage.png', level: 280, arcaneForce: 1320, partyLimit: 6, anchorRate: 63.4, anchorStat: 79883, guard: 300 },
-  { id: 'destiny-kaling', name: '카링', difficulty: '데스티니', image: '/bosses/destiny_kaling.png', level: 285, authenticForce: 350, partyLimit: 1, anchorRate: 58.7, anchorStat: 82675, guard: 380 },
-  { id: 'normal-limbo', name: '림보', difficulty: '노멀', image: '/bosses/normal_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, anchorRate: 63.18, anchorStat: 82888, guard: 380 },
-  { id: 'destiny-kalos', name: '감시자 칼로스', difficulty: '데스티니', image: '/bosses/destiny_kalos.png', level: 285, authenticForce: 330, partyLimit: 1, anchorRate: 77.94, anchorStat: 83583, guard: 380 },
-  { id: 'chaos-kalos', name: '감시자 칼로스', difficulty: '카오스', image: '/bosses/chaos_kalos.png', level: 285, authenticForce: 330, partyLimit: 6, anchorRate: 77.94, anchorStat: 83583, guard: 380 },
-  { id: 'normal-bellona', name: '벨로나', difficulty: '노멀', level: 280, authenticForce: 450, partyLimit: 3, anchorRate: 87.84, anchorStat: 82888, guard: 380 },
-  { id: 'destiny-seren', name: '선택받은 세렌', difficulty: '데스티니', image: '/bosses/destiny_seren.png', level: 275, authenticForce: 200, partyLimit: 1, anchorRate: 127.6, anchorStat: 83583, guard: 380 },
-  { id: 'normal-kaling', name: '카링', difficulty: '노멀', image: '/bosses/normal_kaling.png', level: 285, authenticForce: 330, partyLimit: 6, anchorRate: 143.5, anchorStat: 82675, guard: 380 },
-  { id: 'normal-malefic', name: '악몽선경', difficulty: '노멀', image: '/bosses/normal_maleficStar.png', level: 280, authenticForce: 400, partyLimit: 3, anchorRate: 150.6, anchorStat: 82888, guard: 380 },
-  { id: 'extreme-lotus', name: '스우', difficulty: '익스트림', image: '/bosses/extreme_lotus.png', level: 285, partyLimit: 2, anchorRate: 182.1, anchorStat: 82888, guard: 380 },
-  { id: 'champion-kalos', name: '감시자 칼로스', difficulty: '챔피언', image: '/bosses/champion_kalos.png', level: 280, authenticForce: 300, partyLimit: 1, anchorRate: 262, anchorStat: 83583, guard: 380 },
-  { id: 'normal-adversary', name: '찬란한 흉성', difficulty: '노멀', image: '/bosses/normal_adversary.png', level: 280, authenticForce: 320, partyLimit: 3, anchorRate: 302, anchorStat: 83583, guard: 380 },
-  { id: 'normal-kalos', name: '감시자 칼로스', difficulty: '노멀', image: '/bosses/normal_kalos.png', level: 280, authenticForce: 300, partyLimit: 6, anchorRate: 380.3, anchorStat: 83583, guard: 380 },
-  { id: 'easy-bellona', name: '벨로나', difficulty: '이지', level: 280, authenticForce: 400, partyLimit: 3, anchorRate: 474.8, anchorStat: 82888, guard: 380 },
-  { id: 'champion-seren', name: '선택받은 세렌', difficulty: '챔피언', image: '/bosses/champion_seren.png', level: 275, authenticForce: 200, partyLimit: 1, anchorRate: 456.1, anchorStat: 83583, guard: 380 },
-  { id: 'easy-kaling', name: '카링', difficulty: '이지', image: '/bosses/easy_kaling.png', level: 275, authenticForce: 230, partyLimit: 6, anchorRate: 568.7, anchorStat: 82675, guard: 380 },
-  { id: 'hard-seren', name: '선택받은 세렌', difficulty: '하드', image: '/bosses/hard_seren.png', level: 275, authenticForce: 200, partyLimit: 6, anchorRate: 651.5, anchorStat: 83583, guard: 380 },
-  { id: 'easy-adversary', name: '찬란한 흉성', difficulty: '이지', image: '/bosses/easy_adversary.png', level: 270, authenticForce: 220, partyLimit: 3, anchorRate: 884, anchorStat: 83583, guard: 380 },
-  { id: 'champion-black-mage', name: '검은 마법사', difficulty: '챔피언', image: '/bosses/champion_blackMage.png', level: 275, arcaneForce: 1320, partyLimit: 1, anchorRate: 992.7, anchorStat: 79883, guard: 300 },
+  { id: 'extreme-kaling', name: '카링', difficulty: '익스트림', image: '/bosses/extreme_kaling.png', level: 285, authenticForce: 480, partyLimit: 6, partyBossCut: 108350, easyRate: 0.997841787071066, guard: 380, partyBoss: true },
+  { id: 'extreme-kalos', name: '감시자 칼로스', difficulty: '익스트림', image: '/bosses/extreme_kalos.png', level: 285, authenticForce: 440, partyLimit: 6, bossCut: 90900, easyRate: 0.22694444444444445, guard: 380 },
+  { id: 'hard-bellona', name: '벨로나', difficulty: '하드', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 128200, easyRate: 1.05, guard: 380 },
+  { id: 'destiny-limbo', name: '림보', difficulty: '데스티니', image: '/bosses/destiny_limbo.png', level: 285, authenticForce: 500, partyLimit: 1, bossCut: 118900, easyRate: 0.95, guard: 380 },
+  { id: 'hard-limbo', name: '림보', difficulty: '하드', image: '/bosses/hard_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, bossCut: 118900, easyRate: 0.95, guard: 380 },
+  { id: 'hard-malefic', name: '흉성', difficulty: '하드', image: '/bosses/hard_maleficStar.png', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 117500, easyRate: 0.95, guard: 380 },
+  { id: 'destiny-adversary', name: '대적자', difficulty: '데스티니', image: '/bosses/destiny_adversary.png', level: 285, authenticForce: 340, partyLimit: 1, bossCut: 108100, easyRate: 0.76, guard: 380 },
+  { id: 'hard-adversary', name: '대적자', difficulty: '하드', image: '/bosses/hard_adversary.png', level: 285, authenticForce: 340, partyLimit: 3, bossCut: 108100, easyRate: 0.95, guard: 380 },
+  { id: 'hard-kaling', name: '카링', difficulty: '하드', image: '/bosses/hard_kaling.png', level: 285, authenticForce: 350, partyLimit: 6, bossCut: 105800, easyRate: 0.95, guard: 380 },
+  { id: 'extreme-seren', name: '선택받은 세렌', difficulty: '익스트림', image: '/bosses/extreme_seren.png', level: 280, authenticForce: 200, partyLimit: 6, bossCut: 105700, easyRate: 0.95, guard: 380 },
+  { id: 'extreme-black-mage', name: '검은 마법사', difficulty: '익스트림', image: '/bosses/extreme_blackMage.png', level: 280, arcaneForce: 1320, partyLimit: 6, bossCut: 94500, easyRate: 0.95, guard: 300 },
+  { id: 'destiny-kaling', name: '카링', difficulty: '데스티니', image: '/bosses/destiny_kaling.png', level: 285, authenticForce: 350, partyLimit: 1, bossCut: 105800, easyRate: 1.14, guard: 380 },
+  { id: 'normal-limbo', name: '림보', difficulty: '노멀', image: '/bosses/normal_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, bossCut: 118900, easyRate: 1.8890409456118664, guard: 380 },
+  { id: 'destiny-kalos', name: '감시자 칼로스', difficulty: '데스티니', image: '/bosses/destiny_kalos.png', level: 285, authenticForce: 330, partyLimit: 1, bossCut: 90900, easyRate: 0.95, guard: 380 },
+  { id: 'chaos-kalos', name: '감시자 칼로스', difficulty: '카오스', image: '/bosses/chaos_kalos.png', level: 285, authenticForce: 330, partyLimit: 6, bossCut: 90900, easyRate: 0.95, guard: 380 },
+  { id: 'normal-bellona', name: '벨로나', difficulty: '노멀', level: 280, authenticForce: 450, partyLimit: 3, bossCut: 128200, easyRate: 3.5570596797671037, guard: 380 },
+  { id: 'destiny-seren', name: '선택받은 세렌', difficulty: '데스티니', image: '/bosses/destiny_seren.png', level: 275, authenticForce: 200, partyLimit: 1, bossCut: 105700, easyRate: 2.4048764911816405, guard: 380 },
+  { id: 'normal-kaling', name: '카링', difficulty: '노멀', image: '/bosses/normal_kaling.png', level: 285, authenticForce: 330, partyLimit: 6, bossCut: 105800, easyRate: 2.7877201738381996, guard: 380 },
+  { id: 'normal-malefic', name: '흉성', difficulty: '노멀', image: '/bosses/normal_maleficStar.png', level: 280, authenticForce: 400, partyLimit: 3, bossCut: 117500, easyRate: 4.297226209857768, guard: 380 },
+  { id: 'extreme-lotus', name: '스우', difficulty: '익스트림', image: '/bosses/extreme_lotus.png', level: 285, partyLimit: 2, bossCut: 64500, easyRate: 0.9704301075268816, guard: 380 },
+  { id: 'champion-kalos', name: '감시자 칼로스', difficulty: '챔피언', image: '/bosses/champion_kalos.png', level: 280, authenticForce: 300, partyLimit: 1, bossCut: 90900, easyRate: 3.1766295474321242, guard: 380 },
+  { id: 'normal-adversary', name: '대적자', difficulty: '노멀', image: '/bosses/normal_adversary.png', level: 280, authenticForce: 320, partyLimit: 3, bossCut: 108100, easyRate: 6.114009582055534, guard: 380 },
+  { id: 'normal-kalos', name: '감시자 칼로스', difficulty: '노멀', image: '/bosses/normal_kalos.png', level: 280, authenticForce: 300, partyLimit: 6, bossCut: 90900, easyRate: 4.538042210617321, guard: 380 },
+  { id: 'easy-bellona', name: '벨로나', difficulty: '이지', level: 280, authenticForce: 400, partyLimit: 3, bossCut: 128200, easyRate: 18.821822849807447, guard: 380 },
+  { id: 'champion-seren', name: '선택받은 세렌', difficulty: '챔피언', image: '/bosses/champion_seren.png', level: 275, authenticForce: 200, partyLimit: 1, bossCut: 105700, easyRate: 8.41706771913574, guard: 380 },
+  { id: 'easy-kaling', name: '카링', difficulty: '이지', image: '/bosses/easy_kaling.png', level: 275, authenticForce: 230, partyLimit: 6, bossCut: 105800, easyRate: 10.810543864615774, guard: 380 },
+  { id: 'hard-seren', name: '선택받은 세렌', difficulty: '하드', image: '/bosses/hard_seren.png', level: 275, authenticForce: 200, partyLimit: 6, bossCut: 105700, easyRate: 12.024382455908201, guard: 380 },
+  { id: 'easy-adversary', name: '대적자', difficulty: '이지', image: '/bosses/easy_adversary.png', level: 270, authenticForce: 220, partyLimit: 3, bossCut: 108100, easyRate: 17.611309480434308, guard: 380 },
+  { id: 'champion-black-mage', name: '검은 마법사', difficulty: '챔피언', image: '/bosses/champion_blackMage.png', level: 275, arcaneForce: 1320, partyLimit: 1, bossCut: 40600, easyRate: 1.90887340112972, guard: 300 },
 ];
 
 export function splineValue(spline: Spline, value: number) {
@@ -229,6 +254,25 @@ function combatContext(profile: CharacterProfile, boss: BossDefinition) {
   return { level, force, total: level * force };
 }
 
+function bishopReferenceStat(boss: BossDefinition) {
+  if (boss.name === '카링') return 82_675;
+  if (boss.name === '검은 마법사') return 79_883;
+  if (['벨로나', '림보', '흉성', '스우'].includes(boss.name)) return 82_888;
+  return REFERENCE_HEXA;
+}
+
+function bishopObservedCorrection(boss: BossDefinition, hexaStat: number) {
+  const observed = BISHOP_OBSERVED_CORRECTIONS[boss.id];
+  if (!observed) return { damage: 1, rate: 1 };
+  const weight = Math.min(1, Math.max(0,
+    (REFERENCE_HEXA - hexaStat) / (REFERENCE_HEXA - BISHOP_OBSERVED_HEXA),
+  ));
+  return {
+    damage: 1 + (observed.damage - 1) * weight,
+    rate: 1 + (observed.rate - 1) * weight,
+  };
+}
+
 export function composeIgnoreDefense(lines: number[]) {
   return 1 - lines.reduce((remaining, line) => remaining * (1 - Math.min(100, Math.max(0, line)) / 100), 1);
 }
@@ -241,6 +285,12 @@ function bishopDefenseConstant(ignoreDefense: number, guard: 300 | 380) {
 function statusFor(ratePercent: number, boss: BossDefinition): BossStatus {
   const rate = ratePercent / 100;
   if (boss.partyBoss) {
+    if (boss.partyLimit === 3) {
+      if (rate >= 2.7) return { key: 'solo-min', label: '솔플 최소컷' };
+      if (rate >= 1.35) return { key: 'party', label: '2인 가능' };
+      if (rate >= 0.9) return { key: 'party-min', label: '3인 최소컷' };
+      return { key: 'impossible', label: '불가능' };
+    }
     if (rate >= 5.1) return { key: 'solo-min', label: '솔플 최소컷' };
     if (rate >= 2.55) return { key: 'party', label: '2인 가능' };
     if (rate >= 1.7) return { key: 'party', label: '3인 가능' };
@@ -308,14 +358,36 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
   const input = calculateEngineSummary(hexaStat, profile);
   return bosses.map((boss) => {
     const guardSpline = boss.guard === 300 ? spline300 : spline380;
-    const referenceDamage = boss.guard === 300 ? reference.calculatedHexaDamage300 : reference.calculatedHexaDamage380;
-    const inputDamage = boss.guard === 300 ? input.calculatedHexaDamage300 : input.calculatedHexaDamage380;
+    const inputDamage = boss.name === '카링'
+      ? input.calculatedHexaDamageKaling
+      : boss.guard === 300
+        ? input.calculatedHexaDamage300
+        : input.calculatedHexaDamage380;
+    const referenceDamage = boss.name === '카링'
+      ? reference.calculatedHexaDamageKaling
+      : boss.guard === 300
+        ? reference.calculatedHexaDamage300
+        : reference.calculatedHexaDamage380;
     const context = combatContext(profile, boss);
     const referenceContext = combatContext(REFERENCE_PROFILE, boss);
-    const contextRatio = context.total / referenceContext.total;
-    const rate = boss.anchorRate * (inputDamage / referenceDamage) * contextRatio;
-    const anchorConversion = splineValue(guardSpline, boss.anchorStat) / referenceDamage;
-    const cardStat = inverseSpline(guardSpline, inputDamage * anchorConversion * contextRatio);
+    const forceNormalizer = boss.authenticForce
+      ? 1.25
+      : boss.arcaneForce
+        ? boss.name === '검은 마법사' ? 1.1 : 1.5
+        : 1;
+    const referenceAdjustedDamage = referenceDamage * referenceContext.total / (1.2 * forceNormalizer);
+    const specEfficiency = splineValue(guardSpline, bishopReferenceStat(boss)) / referenceAdjustedDamage;
+    const observation = bishopObservedCorrection(boss, hexaStat);
+    const adjustedDamage = inputDamage * context.total / (1.2 * forceNormalizer)
+      * specEfficiency
+      * observation.damage;
+    const cutoff = boss.partyBossCut ?? boss.bossCut ?? 1;
+    const cutoffDamage = splineValue(guardSpline, cutoff);
+    const baseClearRate = adjustedDamage / cutoffDamage * boss.easyRate * observation.rate;
+    const ascentDivisor = Math.min(3, Math.ceil(20 / Math.max(baseClearRate, Number.EPSILON) / 5.667));
+    const ascentCorrection = 3 * BISHOP_ASCENT_CONSTANT / ascentDivisor - BISHOP_ASCENT_CONSTANT;
+    const rate = baseClearRate * (1 + ascentCorrection) * 100;
+    const cardStat = inverseSpline(guardSpline, adjustedDamage);
     return {
       ...boss,
       rate,
