@@ -2,14 +2,14 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Activity, Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { calculateBosses, calculateEngineSummary, CharacterProfile, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
+import { calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'all' | 'challenge' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
@@ -27,6 +27,7 @@ const statItems = (profile: CharacterProfile) => [
   ['방어율 무시', `${profile.ignoreDefense.toFixed(4)}%`],
   ['데미지 / 보스', `${profile.damage.toFixed(0)}% / ${profile.bossDamage.toFixed(0)}%`],
   ['크확 / 크뎀', `${profile.criticalRate.toFixed(1)}% / ${profile.criticalDamage.toFixed(2)}%`],
+  ['HEXA 코어', profile.hexaCoreCount == null ? '조회 전' : `${profile.hexaCoreCount}개 · 총 Lv.${profile.hexaCoreLevelTotal ?? 0}`],
 ];
 
 function formatDamage(value: number) {
@@ -61,9 +62,10 @@ export default function Home() {
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<Sort>('site');
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState('팸귄 비숍의 83,583 스크린샷을 기준점으로 계산했습니다.');
+  const [notice, setNotice] = useState('2026-08 기준 비숍 300·380 독립 계산 엔진을 적용했습니다.');
   const [noticeKind, setNoticeKind] = useState<NoticeKind>('info');
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
+  const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
 
   useEffect(() => {
@@ -106,7 +108,7 @@ export default function Home() {
       setProfile(data as CharacterProfile);
       setNoticeKind('success');
       setNotice(data.source === 'nexon'
-        ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종을 비교해 최고 조건으로 계산했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}`
+        ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종과 HEXA 코어 ${data.hexaCoreCount ?? 0}개를 확인해 계산했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}${data.dataDate ? ` 기준일 ${data.dataDate.slice(0, 10)}` : ''}`
         : '저장된 기준 스냅샷으로 계산했습니다.');
     } catch (error) {
       setNoticeKind('error');
@@ -144,10 +146,13 @@ export default function Home() {
               <span className="grid size-8 place-items-center rounded-md bg-[#eb5b35] text-white"><Calculator className="size-4.5" /></span>
               <div>
                 <p className="text-[15px] font-bold leading-tight">보스컷 랩</p>
-                <p className="text-[11px] text-[#747b88]">비숍 헥사환산 배율 계산기</p>
+                <p className="text-[11px] text-[#747b88]">비숍 현대 계산 엔진</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEngineDialogOpen(true)} className="h-8 rounded-md border-[#dfe2e8] px-2.5 text-xs text-[#535b68]">
+                <Activity className="size-3.5" /> 계산식
+              </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => setApiDialogOpen(true)} className={`h-8 rounded-md px-2.5 text-xs ${apiKey ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-[#dfe2e8] text-[#535b68]'}`}>
                 <KeyRound className="size-3.5" /> {apiKey ? 'API 연결됨' : 'API 연결'}
               </Button>
@@ -164,15 +169,15 @@ export default function Home() {
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h1 className="text-xl font-bold">닉네임과 헥사환산으로 보스 효율컷 계산</h1>
-                  <p className="mt-1 text-sm text-[#687080]">공식 캐릭터 정보와 비숍 기준 실전딜 곡선을 함께 적용합니다.</p>
+                  <p className="mt-1 text-sm text-[#687080]">공식 캐릭터 정보와 300·380 방어율 독립 실전딜 곡선을 함께 적용합니다.</p>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-[#687080]">
                   <ShieldCheck className="size-4 text-emerald-600" />
-                  {exactAnchor ? '83,583 기준값과 일치' : '기준점 외 구간은 추정치'}
+                  {exactAnchor ? '83,583 검증값과 일치' : ENGINE_VERSION}
                   <TooltipTrigger className="ml-0.5 grid size-6 place-items-center rounded-md hover:bg-[#f1f3f5]" aria-label="계산 기준 설명">
                     <CircleHelp className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent className="max-w-72">비숍의 300·380 스플라인과 실전 방무·카링 계수를 역산해 적용하며, 프리셋 효과는 공식 API 옵션값으로 비교합니다.</TooltipContent>
+                  <TooltipContent className="max-w-72">300·380 독립 스플라인, 비숍 방무 합성, 레벨·포스 배율과 카링 보정을 순서대로 적용합니다.</TooltipContent>
                 </div>
               </div>
 
@@ -196,7 +201,7 @@ export default function Home() {
           </section>
 
           <section className="border-b border-[#dfe2e8] bg-[#fbfbfc]">
-            <div className="mx-auto grid max-w-[1540px] grid-cols-2 divide-x divide-y divide-[#e3e6eb] px-4 sm:grid-cols-5 sm:px-6">
+            <div className="mx-auto grid max-w-[1540px] grid-cols-2 divide-x divide-y divide-[#e3e6eb] px-4 sm:grid-cols-3 sm:px-6 lg:grid-cols-6">
               {statItems(profile).map(([label, value]) => (
                 <div key={label} className="px-3 py-3.5 first:pl-0 sm:px-5">
                   <p className="text-[11px] font-medium text-[#7a818d]">{label}</p>
@@ -270,6 +275,7 @@ export default function Home() {
                       <p className="truncate text-[11px] font-bold uppercase text-[#d85432]">{boss.difficulty}</p>
                       <h2 className="mt-0.5 min-h-10 text-sm font-bold leading-5">{boss.name}</h2>
                       <p className="text-[11px] text-[#7b828d]">Lv.{boss.level} · 최대 {boss.partyLimit}인</p>
+                      <p className="mt-0.5 text-[10px] tabular-nums text-[#9096a0]">레벨 ×{boss.levelMultiplier.toFixed(2)} · 포스 ×{boss.forceMultiplier.toFixed(2)}</p>
                     </div>
                   </div>
                   <div className="mt-3 flex items-end justify-between border-t border-[#e5e7eb] pt-3">
@@ -302,6 +308,35 @@ export default function Home() {
               <Button type="submit" className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">저장 후 조회</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={engineDialogOpen} onOpenChange={setEngineDialogOpen}>
+        <DialogContent className="rounded-lg sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Layers3 className="size-4 text-[#eb5b35]" /> 현대 계산 엔진</DialogTitle>
+            <DialogDescription>{engine.breakdown.version} · 비숍 전용</DialogDescription>
+          </DialogHeader>
+          <div className="divide-y divide-[#e4e7ec] border-y border-[#e4e7ec] text-sm">
+            {[
+              ['300 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage300), `HEXA 보정 ×${engine.breakdown.hexaCorrection300.toFixed(6)}`],
+              ['380 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage380), `HEXA 보정 ×${engine.breakdown.hexaCorrection380.toFixed(6)}`],
+              ['프리셋 실전딜', `×${engine.breakdown.presetOffenseMultiplier.toFixed(6)}`, `방무 300 ×${engine.breakdown.presetDefenseMultiplier300.toFixed(6)} · 380 ×${engine.breakdown.presetDefenseMultiplier380.toFixed(6)}`],
+              ['방무 상수', `${engine.breakdown.defenseConstant300.toFixed(6)} / ${engine.breakdown.defenseConstant380.toFixed(6)}`, '여러 방무 줄을 곱연산으로 합성'],
+              ['카링 실전 보정', `×${engine.breakdown.kalingMultiplier.toFixed(6)}`, '380 피해량 기준'],
+              ['직업 상수', `무기 ${engine.breakdown.weaponConstant.toFixed(2)} · 숙련 ${Math.round(engine.breakdown.proficiency * 100)}%`, `최종뎀 ${engine.breakdown.classFinalDamage.toFixed(4)}% · 속성내성 무시 ${engine.breakdown.ignoreElementalResistance}%`],
+            ].map(([label, value, detail]) => (
+              <div key={label} className="grid gap-1 py-3 sm:grid-cols-[130px_1fr] sm:gap-4">
+                <p className="text-xs font-semibold text-[#737b87]">{label}</p>
+                <div className="min-w-0">
+                  <p className="font-bold tabular-nums text-[#292e37]">{value}</p>
+                  <p className="mt-0.5 text-xs text-[#7a818d]">{detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setEngineDialogOpen(false)} className="rounded-md bg-[#20242c] hover:bg-[#15181e]">확인</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Tooltip>

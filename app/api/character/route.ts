@@ -4,6 +4,7 @@ import { optimizePresets } from '@/lib/presets';
 const API_BASE = 'https://open.api.nexon.com/maplestory/v1';
 type FinalStat = { stat_name: string; stat_value: string };
 type NexonError = { error?: { name?: string; message?: string }; name?: string; message?: string };
+type JsonRecord = Record<string, unknown>;
 
 function numeric(value: unknown) {
   if (typeof value !== 'string' && typeof value !== 'number') return 0;
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
   const { ocid } = await idResponse.json() as { ocid?: string };
   if (!ocid) return Response.json({ error: '캐릭터 식별값을 받지 못했습니다.' }, { status: 502 });
 
-  const [basicResponse, statResponse, symbols, items, ability, hyper, links, union] = await Promise.all([
+  const [basicResponse, statResponse, symbols, items, ability, hyper, links, union, hexaMatrix, hexaStatMatrix] = await Promise.all([
     nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers),
     nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers),
     optionalJson('character/symbol-equipment', ocid, headers),
@@ -64,6 +65,8 @@ export async function GET(request: Request) {
     optionalJson('character/hyper-stat', ocid, headers),
     optionalJson('character/link-skill', ocid, headers),
     optionalJson('user/union-raider', ocid, headers),
+    optionalJson('character/hexamatrix', ocid, headers),
+    optionalJson('character/hexamatrix-stat', ocid, headers),
   ]);
   if (!basicResponse.ok) return upstreamError(basicResponse, '기본 정보');
   if (!statResponse.ok) return upstreamError(statResponse, '종합 능력치');
@@ -75,6 +78,13 @@ export async function GET(request: Request) {
   const symbolItems = (symbols as { symbol?: Array<{ symbol_name?: string; symbol_force?: number }> } | undefined)?.symbol ?? [];
   const symbolForce = (type: string) => symbolItems.filter((symbol) => symbol.symbol_name?.includes(type)).reduce((total, symbol) => total + numeric(symbol.symbol_force), 0);
   const characterClass = (basic as { character_class?: string }).character_class ?? '알 수 없음';
+  const hexaCores = ((hexaMatrix as JsonRecord | undefined)?.character_hexa_core_equipment ?? []) as Array<JsonRecord>;
+  const hexaStatRecord = (hexaStatMatrix ?? {}) as JsonRecord;
+  const hexaStatCoreCount = [
+    hexaStatRecord.character_hexa_stat_core,
+    hexaStatRecord.character_hexa_stat_core_2,
+    hexaStatRecord.character_hexa_stat_core_3,
+  ].filter(Boolean).length;
   const currentStats = {
     ignoreDefense: statValue(finalStats, ['방어율 무시']),
     damage: statValue(finalStats, ['데미지']),
@@ -91,8 +101,12 @@ export async function GET(request: Request) {
     characterClass,
     level: numeric((basic as { character_level?: number }).character_level),
     image: (basic as { character_image?: string }).character_image,
+    dataDate: (stat as { date?: string }).date ?? (basic as { date?: string }).date,
     arcaneForce: statValue(finalStats, ['아케인포스']) || symbolForce('아케인'),
     authenticForce: statValue(finalStats, ['어센틱포스']) || symbolForce('어센틱'),
+    hexaCoreCount: hexaCores.length,
+    hexaCoreLevelTotal: hexaCores.reduce((total, core) => total + numeric(core.hexa_core_level), 0),
+    hexaStatCoreCount,
     ...(optimized?.profile ?? currentStats),
     bestCondition: optimized?.bestCondition,
     source: 'nexon',
