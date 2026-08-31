@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
+import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -67,10 +67,13 @@ export default function Home() {
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const requestSequence = useRef(0);
+  const requestController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const storedKey = sessionStorage.getItem('nexon-open-api-key');
     if (storedKey) queueMicrotask(() => setApiKey(storedKey));
+    return () => requestController.current?.abort();
   }, []);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
@@ -101,14 +104,22 @@ export default function Home() {
       setNoticeKind('error');
       return setNotice('헥사환산 값을 입력해 주세요.');
     }
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
     setLoading(true);
     try {
       const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}`, {
         headers: key ? { 'x-nexon-api-key': key } : {},
+        signal: controller.signal,
       });
       const data = await response.json() as CharacterProfile & { error?: string; code?: string };
+      if (sequence !== requestSequence.current) return;
       if (data.code === 'API_KEY_REQUIRED') setApiDialogOpen(true);
       if (!response.ok) throw new Error(data.error ?? '캐릭터 정보를 불러오지 못했습니다.');
+      if (data.partialData) throw new Error('공식 API 일부 응답이 지연되었습니다. 잠시 후 다시 계산해 주세요.');
       setProfile(data as CharacterProfile);
       setNoticeKind('success');
       const maxSymbols = Object.values(data.calculationProfile?.symbolLevels ?? {}).filter((level) => level === 11).length;
@@ -116,10 +127,11 @@ export default function Home() {
         ? `${data.characterClass === '비숍' ? `공식 API 프리셋 ${data.bestCondition?.sourceCount ?? 0}종, HEXA 코어 ${data.hexaCoreCount ?? 0}개, 최고레벨 지역 심볼 ${maxSymbols}개를 적용했습니다.` : '현재 계산 곡선은 비숍 전용이므로 이 직업의 결과는 참고치입니다.'}${data.dataDate ? ` 기준일 ${data.dataDate.slice(0, 10)}` : ''}`
         : '저장된 기준 스냅샷으로 계산했습니다.');
     } catch (error) {
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setNoticeKind('error');
       setNotice(error instanceof Error ? error.message : '조회 중 오류가 발생했습니다.');
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }
 
@@ -229,10 +241,10 @@ export default function Home() {
               <div className="min-w-0 lg:w-[38%]">
                 <div className="flex items-center gap-2">
                   <Crown className="size-4 text-[#eb5b35]" />
-                  <p className="text-xs font-bold text-[#3a404a]">{profile.bestCondition?.applied ? '최고 컨디션 자동 적용' : '현재 컨디션'}</p>
+                  <p className="text-xs font-bold text-[#3a404a]">{profile.bestCondition?.applied ? '프리셋 분석 완료' : '현재 컨디션'}</p>
                   {profile.bestCondition?.applied && (
                     <Badge variant="outline" className="rounded-sm border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">
-                      실전딜 +{profile.bestCondition.improvementPercent.toFixed(2)}%
+                      {profile.bestCondition.sourceCount}종 확인
                     </Badge>
                   )}
                 </div>
@@ -336,7 +348,7 @@ export default function Home() {
               ['지역 심볼', `최고 레벨 ${engine.breakdown.maxAuthenticSymbols}개`, '보스 지역과 연결된 어센틱심볼 Lv.11 보정'],
               ['300 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage300), `HEXA 보정 ×${engine.breakdown.hexaCorrection300.toFixed(6)}`],
               ['380 독립 스플라인', formatDamage(engine.breakdown.rawCurveDamage380), `HEXA 보정 ×${engine.breakdown.hexaCorrection380.toFixed(6)}`],
-              ['프리셋 실전딜', `×${engine.breakdown.presetOffenseMultiplier.toFixed(6)}`, `방무 300 ×${engine.breakdown.presetDefenseMultiplier300.toFixed(6)} · 380 ×${engine.breakdown.presetDefenseMultiplier380.toFixed(6)}`],
+              ['프리셋 중복 방지', `×${engine.breakdown.presetOffenseMultiplier.toFixed(6)}`, '입력 헥환에 포함된 프리셋 전투력을 다시 곱하지 않음'],
               ['방무 상수', `${engine.breakdown.defenseConstant300.toFixed(6)} / ${engine.breakdown.defenseConstant380.toFixed(6)}`, '여러 방무 줄을 곱연산으로 합성'],
               ['카링 실전 보정', `×${engine.breakdown.kalingMultiplier.toFixed(6)}`, '380 피해량 기준'],
               ['직업 상수', `무기 ${engine.breakdown.weaponConstant.toFixed(2)} · 숙련 ${Math.round(engine.breakdown.proficiency * 100)}%`, `최종뎀 ${engine.breakdown.classFinalDamage.toFixed(4)}% · 속성내성 무시 ${engine.breakdown.ignoreElementalResistance}%`],

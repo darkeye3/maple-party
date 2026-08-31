@@ -88,12 +88,14 @@ function hexaCoreProfile(cores: JsonRecord[], statMatrix: unknown): CharacterCal
 }
 
 async function nexonFetch(url: string, headers: Record<string, string>) {
-  let response = await fetch(url, { headers });
-  if (response.status === 429 || response.status >= 500) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     response = await fetch(url, { headers });
+    if (response.status !== 429 && response.status < 500) return response;
+    const retryAfter = Number(response.headers.get('retry-after')) * 1000;
+    await new Promise((resolve) => setTimeout(resolve, retryAfter || 300 * (2 ** attempt)));
   }
-  return response;
+  return response as Response;
 }
 
 async function upstreamError(response: Response, endpoint: string) {
@@ -116,7 +118,7 @@ export async function GET(request: Request) {
   const nickname = new URL(request.url).searchParams.get('nickname')?.trim();
   if (!nickname) return Response.json({ error: '닉네임을 입력해 주세요.' }, { status: 400 });
   const requestApiKey = request.headers.get('x-nexon-api-key')?.trim();
-  const apiKey = requestApiKey || process.env.NEXON_API_KEY;
+  const apiKey = process.env.NEXON_API_KEY || requestApiKey;
   if (!apiKey) {
     if (nickname === REFERENCE_PROFILE.nickname) return Response.json(REFERENCE_PROFILE);
     return Response.json({ error: '다른 캐릭터를 조회하려면 NEXON Open API 키를 연결해 주세요.', code: 'API_KEY_REQUIRED' }, { status: 401 });
@@ -128,17 +130,9 @@ export async function GET(request: Request) {
   const { ocid } = await idResponse.json() as { ocid?: string };
   if (!ocid) return Response.json({ error: '캐릭터 식별값을 받지 못했습니다.' }, { status: 502 });
 
-  const [basicResponse, statResponse, symbols, items, ability, hyper, links, union, hexaMatrix, hexaStatMatrix] = await Promise.all([
+  const [basicResponse, statResponse] = await Promise.all([
     nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers),
     nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers),
-    optionalJson('character/symbol-equipment', ocid, headers),
-    optionalJson('character/item-equipment', ocid, headers),
-    optionalJson('character/ability', ocid, headers),
-    optionalJson('character/hyper-stat', ocid, headers),
-    optionalJson('character/link-skill', ocid, headers),
-    optionalJson('user/union-raider', ocid, headers),
-    optionalJson('character/hexamatrix', ocid, headers),
-    optionalJson('character/hexamatrix-stat', ocid, headers),
   ]);
   if (!basicResponse.ok) return upstreamError(basicResponse, '기본 정보');
   if (!statResponse.ok) return upstreamError(statResponse, '종합 능력치');
@@ -146,6 +140,24 @@ export async function GET(request: Request) {
     basicResponse.json(),
     statResponse.json(),
   ]);
+  const optionalPaths = [
+    'character/symbol-equipment',
+    'character/item-equipment',
+    'character/ability',
+    'character/hyper-stat',
+    'character/link-skill',
+    'user/union-raider',
+    'character/hexamatrix',
+    'character/hexamatrix-stat',
+  ];
+  const optionalResults: unknown[] = [];
+  for (const path of optionalPaths) {
+    optionalResults.push(await optionalJson(path, ocid, headers));
+    await new Promise((resolve) => setTimeout(resolve, 180));
+  }
+  const [symbols, items, ability, hyper, links, union, hexaMatrix, hexaStatMatrix] = optionalResults;
+  const presetSourcesComplete = [items, ability, hyper, links, union].every((source) => source !== undefined);
+  const partialData = optionalResults.some((source) => source === undefined);
   const finalStats = (stat as { final_stat?: FinalStat[] }).final_stat ?? [];
   const symbolItems = (symbols as { symbol?: Array<{ symbol_name?: string; symbol_force?: number; symbol_level?: number }> } | undefined)?.symbol ?? [];
   const symbolForce = (type: string) => symbolItems.filter((symbol) => symbol.symbol_name?.includes(type)).reduce((total, symbol) => total + numeric(symbol.symbol_force), 0);
@@ -164,7 +176,7 @@ export async function GET(request: Request) {
     criticalRate: statValue(finalStats, ['크리티컬 확률']),
     criticalDamage: statValue(finalStats, ['크리티컬 데미지']),
   };
-  const optimized = characterClass === '비숍'
+  const optimized = characterClass === '비숍' && presetSourcesComplete
     ? optimizePresets(currentStats, { items, ability, hyper, links, union })
     : undefined;
   const calculationProfile: CharacterCalculationProfile = {
@@ -194,6 +206,7 @@ export async function GET(request: Request) {
     ...(optimized?.profile ?? currentStats),
     bestCondition: optimized?.bestCondition,
     calculationProfile,
+    partialData,
     source: 'nexon',
   });
 }

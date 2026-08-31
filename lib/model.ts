@@ -16,6 +16,7 @@ export type CharacterProfile = {
   hexaCoreLevelTotal?: number;
   hexaStatCoreCount?: number;
   dataDate?: string;
+  partialData?: boolean;
   bestCondition?: BestCondition;
   calculationProfile?: CharacterCalculationProfile;
   source: 'reference' | 'nexon';
@@ -397,11 +398,12 @@ function statusFor(ratePercent: number, boss: BossDefinition): BossStatus {
 
 export function calculateEngineSummary(hexaStat: number, profile: CharacterProfile): EngineSummary {
   const safeHexa = Math.max(0, Math.min(250_000, hexaStat));
-  const condition = profile.bestCondition;
-  const baseIgnoreDefense = condition?.baseIgnoreDefense ?? profile.ignoreDefense;
-  const offenseMultiplier = condition?.multiplier ?? 1;
-  const defenseMultiplier300 = condition?.defenseMultiplier300 ?? 1;
-  const defenseMultiplier380 = condition?.defenseMultiplier380 ?? 1;
+  // The entered HEXA conversion already includes the selected presets. Applying
+  // estimated preset gains again would double-count the same character power.
+  const baseIgnoreDefense = profile.ignoreDefense;
+  const offenseMultiplier = 1;
+  const defenseMultiplier300 = 1;
+  const defenseMultiplier380 = 1;
   const rawCurveDamage300 = curveValue(spline300, safeHexa, profile, 300);
   const rawCurveDamage380 = curveValue(spline380, safeHexa, profile, 380);
   const calculatedHexaDamage300 = rawCurveDamage300
