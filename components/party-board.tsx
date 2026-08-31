@@ -2,16 +2,17 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, CircleUserRound, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
+import { CalendarClock, Check, CircleUserRound, LayoutGrid, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Toggle } from '@/components/ui/toggle';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { PartyActionResponse, PartyPost } from '@/lib/parties';
 
-type PartyFilter = 'all' | 'eligible' | 'open';
+const DEPARTING_SOON_MS = 3 * 60 * 60_000;
 
 type PartyBoardProps = {
   profile: CharacterProfile;
@@ -76,7 +77,12 @@ export function PartyBoard({
   const [listLoading, setListLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState('');
-  const [filter, setFilter] = useState<PartyFilter>('all');
+  const [bossFilter, setBossFilter] = useState('all');
+  const [difficultyFilter, setDifficultyFilter] = useState('all');
+  const [eligibleOnly, setEligibleOnly] = useState(false);
+  const [openOnly, setOpenOnly] = useState(false);
+  const [departingSoonOnly, setDepartingSoonOnly] = useState(false);
+  const [departingSoonReference, setDepartingSoonReference] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<PartyPost | null>(null);
@@ -91,6 +97,7 @@ export function PartyBoard({
 
   async function refreshParties() {
     setListLoading(true);
+    if (departingSoonOnly) setDepartingSoonReference(Date.now());
     try {
       setParties(await fetchPartyList());
     } catch (error) {
@@ -144,17 +151,54 @@ export function PartyBoard({
   }
 
   const myRates = useMemo(() => new Map(partyBosses.map((boss) => [boss.id, boss.rate])), [partyBosses]);
-  const visibleParties = parties.filter((party) => {
-    if (filter === 'open') return party.status === 'open' && party.members.length < party.capacity;
-    if (filter === 'eligible') {
-      return profileMatchesNickname
-        && party.status === 'open'
-        && party.members.length < party.capacity
-        && !party.members.some((member) => member.nickname === nickname.trim())
-        && (myRates.get(party.bossId) ?? 0) >= party.minimumRate;
+  const bossFilterOptions = useMemo(() => {
+    const options = new Map<string, { name: string; image?: string; count: number }>();
+
+    for (const party of parties) {
+      const current = options.get(party.bossName);
+      const matchedBoss = partyBosses.find((boss) => boss.id === party.bossId);
+      const image = matchedBoss?.image ?? partyBosses.find((boss) => boss.name === party.bossName && boss.image)?.image;
+
+      options.set(party.bossName, {
+        name: party.bossName,
+        image: current?.image ?? image,
+        count: (current?.count ?? 0) + 1,
+      });
     }
-    return true;
-  });
+
+    return [...options.values()];
+  }, [parties, partyBosses]);
+  const difficultyFilterOptions = useMemo(() => (
+    [...new Set(parties
+      .filter((party) => bossFilter === 'all' || party.bossName === bossFilter)
+      .map((party) => party.difficulty))]
+  ), [bossFilter, parties]);
+  const activeDifficultyFilter = difficultyFilterOptions.includes(difficultyFilter) ? difficultyFilter : 'all';
+  const visibleParties = useMemo(() => {
+    const nicknameValue = nickname.trim();
+    const departingSoonLimit = departingSoonReference + DEPARTING_SOON_MS;
+
+    return parties.filter((party) => {
+      const hasSeat = party.status === 'open' && party.members.length < party.capacity;
+      const departureTime = new Date(party.departureAt).getTime();
+      const canJoinParty = profileMatchesNickname
+        && hasSeat
+        && !party.members.some((member) => member.nickname === nicknameValue)
+        && (myRates.get(party.bossId) ?? 0) >= party.minimumRate;
+
+      if (bossFilter !== 'all' && party.bossName !== bossFilter) return false;
+      if (activeDifficultyFilter !== 'all' && party.difficulty !== activeDifficultyFilter) return false;
+      if (eligibleOnly && !canJoinParty) return false;
+      if (openOnly && !hasSeat) return false;
+      if (departingSoonOnly && (!Number.isFinite(departureTime) || departureTime < departingSoonReference || departureTime > departingSoonLimit)) return false;
+      return true;
+    });
+  }, [activeDifficultyFilter, bossFilter, departingSoonOnly, departingSoonReference, eligibleOnly, myRates, nickname, openOnly, parties, profileMatchesNickname]);
+
+  function selectBossFilter(value: string) {
+    setBossFilter(value);
+    setDifficultyFilter('all');
+  }
 
   async function postAction(payload: Record<string, unknown>) {
     const response = await fetch('/api/parties', {
@@ -257,7 +301,7 @@ export function PartyBoard({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold">파티 모집</h1>
-                <Badge variant="outline" className="rounded-sm border-emerald-200 bg-emerald-50 text-emerald-700">모집 중 {parties.filter((party) => party.status === 'open').length}</Badge>
+                <Badge variant="outline" className="rounded-sm border-emerald-200 bg-emerald-50 text-emerald-700">모집 중 {parties.filter((party) => party.status === 'open' && party.members.length < party.capacity).length}</Badge>
               </div>
               <p className="mt-1 text-sm text-[#687080]">보스 배율이 맞는 파티를 찾고 출발 시간을 예약하세요.</p>
             </div>
@@ -277,13 +321,67 @@ export function PartyBoard({
       </section>
 
       <section className="border-b border-[#dfe2e8] bg-[#fbfbfc]">
-        <div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-1 rounded-md border border-[#d7dbe2] bg-white p-1">
-            {([['all', '전체'], ['eligible', '가입 가능'], ['open', '모집 중']] as Array<[PartyFilter, string]>).map(([value, label]) => (
-              <Button key={value} type="button" variant="ghost" size="sm" onClick={() => setFilter(value)} className={`h-8 rounded-sm px-3 text-xs ${filter === value ? 'bg-[#20242c] text-white hover:bg-[#20242c] hover:text-white' : 'text-[#626a77]'}`}>{label}</Button>
-            ))}
+        <div className="mx-auto max-w-[1540px] px-4 py-4 sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xs font-bold text-[#343a44]">보스 선택</h2>
+              <p className="mt-0.5 text-[11px] text-[#858c97]">현재 등록된 모집글 기준</p>
+            </div>
+            <p className="shrink-0 text-xs font-semibold tabular-nums text-[#687080]">{visibleParties.length}개 파티</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" disabled={listLoading} onClick={() => void refreshParties()} className="h-8 rounded-md text-xs text-[#737b87]"><RefreshCw className={`size-3.5 ${listLoading ? 'animate-spin' : ''}`} />새로고침</Button>
+
+          <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6">
+            <div className="flex min-w-max gap-2">
+              <button
+                type="button"
+                aria-pressed={bossFilter === 'all'}
+                onClick={() => selectBossFilter('all')}
+                className={`relative flex w-[74px] flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/40 ${bossFilter === 'all' ? 'border-[#eb5b35] bg-[#fff5f1] text-[#c74928]' : 'border-[#dfe2e8] bg-white text-[#626a77] hover:border-[#bec4ce]'}`}
+              >
+                <span className="grid size-[52px] place-items-center rounded-md bg-[#252a32] text-white"><LayoutGrid className="size-5" /></span>
+                <span>전체</span>
+                <span className="absolute right-1 top-1 min-w-5 rounded-full border-2 border-white bg-[#20242c] px-1 text-center text-[10px] leading-4 text-white">{parties.length}</span>
+              </button>
+              {bossFilterOptions.map((boss) => {
+                const selected = bossFilter === boss.name;
+                return (
+                  <button
+                    key={boss.name}
+                    type="button"
+                    title={boss.name}
+                    aria-pressed={selected}
+                    onClick={() => selectBossFilter(boss.name)}
+                    className={`relative flex w-[74px] flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/40 ${selected ? 'border-[#eb5b35] bg-[#fff5f1] text-[#c74928]' : 'border-[#dfe2e8] bg-white text-[#626a77] hover:border-[#bec4ce]'}`}
+                  >
+                    {boss.image
+                      ? <Image src={boss.image} alt={boss.name} width={52} height={52} className="size-[52px] rounded-md border border-[#d7dbe2] object-cover" />
+                      : <span className="grid size-[52px] place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{boss.name}</span>}
+                    <span className="w-full truncate">{boss.name}</span>
+                    <span className={`absolute right-1 top-1 min-w-5 rounded-full border-2 border-white px-1 text-center text-[10px] leading-4 text-white ${selected ? 'bg-[#eb5b35]' : 'bg-[#20242c]'}`}>{boss.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[#e1e4e9] pt-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1 rounded-md border border-[#d7dbe2] bg-white p-1">
+                {['all', ...difficultyFilterOptions].map((difficulty) => {
+                  const selected = activeDifficultyFilter === difficulty;
+                  return (
+                    <Button key={difficulty} type="button" variant="ghost" size="sm" onClick={() => setDifficultyFilter(difficulty)} className={`h-7 rounded-sm px-2.5 text-xs ${selected ? 'bg-[#20242c] text-white hover:bg-[#20242c] hover:text-white' : 'text-[#626a77]'}`}>
+                      {difficulty === 'all' ? '전체 난이도' : difficulty}
+                    </Button>
+                  );
+                })}
+              </div>
+              <Toggle pressed={eligibleOnly} onPressedChange={setEligibleOnly} variant="outline" size="sm" className={`h-9 rounded-md px-3 text-xs ${eligibleOnly ? 'border-[#eb5b35] bg-[#fff0eb] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#626a77]'}`}><UserRoundCheck className="size-3.5" />가입 가능</Toggle>
+              <Toggle pressed={openOnly} onPressedChange={setOpenOnly} variant="outline" size="sm" className={`h-9 rounded-md px-3 text-xs ${openOnly ? 'border-[#eb5b35] bg-[#fff0eb] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#626a77]'}`}><Users className="size-3.5" />자리 있음</Toggle>
+              <Toggle pressed={departingSoonOnly} onPressedChange={(pressed) => { setDepartingSoonOnly(pressed); if (pressed) setDepartingSoonReference(Date.now()); }} variant="outline" size="sm" className={`h-9 rounded-md px-3 text-xs ${departingSoonOnly ? 'border-[#eb5b35] bg-[#fff0eb] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#626a77]'}`}><CalendarClock className="size-3.5" />3시간 이내</Toggle>
+            </div>
+            <Button type="button" variant="ghost" size="sm" disabled={listLoading} onClick={() => void refreshParties()} className="h-8 rounded-md text-xs text-[#737b87]"><RefreshCw className={`size-3.5 ${listLoading ? 'animate-spin' : ''}`} />새로고침</Button>
+          </div>
         </div>
       </section>
 
