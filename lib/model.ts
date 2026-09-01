@@ -65,6 +65,7 @@ type BossDefinition = {
   easyRate: number;
   guard: 300 | 380;
   partyBoss?: boolean;
+  normalizedReferenceContext?: boolean;
 };
 
 export type BossResult = BossDefinition & {
@@ -108,7 +109,7 @@ export type EngineSummary = {
 
 export const REFERENCE_HEXA = 83_583;
 export const ENGINE_VERSION = 'Bishop Character Curve 2026.08 v4';
-export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-09-01';
+export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-09-02';
 
 export const REFERENCE_PROFILE: CharacterProfile = {
   nickname: '팸귄',
@@ -151,14 +152,14 @@ const spline380: Spline = {
 };
 
 const bosses: BossDefinition[] = [
-  { id: 'hard-jupiter', name: '유피테르', difficulty: '하드', image: '/bosses/hard_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 0.457793180966654, guard: 380 },
+  { id: 'hard-jupiter', name: '유피테르', difficulty: '하드', image: '/bosses/hard_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 1.0837770618832794, guard: 380, partyBoss: true, normalizedReferenceContext: true },
   { id: 'extreme-kaling', name: '카링', difficulty: '익스트림', image: '/bosses/extreme_kaling.png', level: 285, authenticForce: 480, partyLimit: 6, partyBossCut: 108350, easyRate: 0.997841787071066, guard: 380, partyBoss: true },
   { id: 'extreme-kalos', name: '감시자 칼로스', difficulty: '익스트림', image: '/bosses/extreme_kalos.png', level: 285, authenticForce: 440, partyLimit: 6, bossCut: 90900, easyRate: 0.22694444444444445, guard: 380 },
   { id: 'hard-bellona', name: '벨로나', difficulty: '하드', image: '/bosses/hard_bellona.png', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 128200, easyRate: 1.05, guard: 380 },
   { id: 'destiny-limbo', name: '림보', difficulty: '데스티니', image: '/bosses/destiny_limbo.png', level: 285, authenticForce: 500, partyLimit: 1, bossCut: 118900, easyRate: 0.95, guard: 380 },
   { id: 'hard-limbo', name: '림보', difficulty: '하드', image: '/bosses/hard_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, bossCut: 118900, easyRate: 0.95, guard: 380 },
   { id: 'hard-malefic', name: '흉성', difficulty: '하드', image: '/bosses/hard_maleficStar.png', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 117500, easyRate: 0.95, guard: 380 },
-  { id: 'normal-jupiter', name: '유피테르', difficulty: '노멀', image: '/bosses/normal_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 2.10033692027366, guard: 380 },
+  { id: 'normal-jupiter', name: '유피테르', difficulty: '노멀', image: '/bosses/normal_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 1.6722219077161573, guard: 380, normalizedReferenceContext: true },
   { id: 'destiny-adversary', name: '대적자', difficulty: '데스티니', image: '/bosses/destiny_adversary.png', level: 285, authenticForce: 340, partyLimit: 1, bossCut: 108100, easyRate: 0.76, guard: 380 },
   { id: 'hard-adversary', name: '대적자', difficulty: '하드', image: '/bosses/hard_adversary.png', level: 285, authenticForce: 340, partyLimit: 3, bossCut: 108100, easyRate: 0.95, guard: 380 },
   { id: 'hard-kaling', name: '카링', difficulty: '하드', image: '/bosses/hard_kaling.png', level: 285, authenticForce: 350, partyLimit: 6, bossCut: 105800, easyRate: 0.95, guard: 380 },
@@ -469,7 +470,10 @@ export function calculateBosses(hexaStat: number, profile: CharacterProfile): Bo
       : boss.arcaneForce
         ? boss.name === '검은 마법사' ? 1.1 : 1.5
         : 1;
-    const referenceAdjustedDamage = referenceDamage * referenceContext.total / (1.2 * forceNormalizer);
+    const referenceTotal = boss.normalizedReferenceContext
+      ? 1.2 * forceNormalizer
+      : referenceContext.total;
+    const referenceAdjustedDamage = referenceDamage * referenceTotal / (1.2 * forceNormalizer);
     const specEfficiency = curveValue(guardSpline, bishopReferenceStat(boss, profile), profile, boss.guard)
       / referenceAdjustedDamage;
     const symbolMultiplier = authenticSymbolMultiplier(profile, boss, input);
