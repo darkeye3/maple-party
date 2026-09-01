@@ -10,6 +10,16 @@ export const createPartiesTable = `
     leader_nickname TEXT NOT NULL,
     leader_hexa INTEGER NOT NULL,
     leader_rate REAL NOT NULL,
+    format_version TEXT NOT NULL DEFAULT 'legacy',
+    required_party_rate REAL,
+    main_capacity INTEGER,
+    main_minimum_rate REAL,
+    secondary_capacity INTEGER,
+    secondary_minimum_rate REAL,
+    reward_preset TEXT,
+    secondary_crystal_share REAL,
+    terms_version INTEGER NOT NULL DEFAULT 1,
+    terms_locked_at TEXT,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'full', 'cancelled')),
     created_at TEXT NOT NULL
   )
@@ -26,6 +36,9 @@ export const createPartyMembersTable = `
     hexa_stat INTEGER NOT NULL,
     verified_rate REAL NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('leader', 'member')),
+    combat_role TEXT,
+    terms_version_agreed INTEGER,
+    terms_agreed_at TEXT,
     joined_at TEXT NOT NULL,
     UNIQUE (party_id, nickname)
   )

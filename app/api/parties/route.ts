@@ -1,7 +1,7 @@
 import { GET as getCharacterResponse } from '@/app/api/character/route';
 import { ensurePartySchema, partyDatabase } from '@/lib/db';
 import { calculateBosses, type CharacterProfile, getBossDefinition } from '@/lib/model';
-import type { PartyMember, PartyPost } from '@/lib/parties';
+import type { CombatRole, PartyMember, PartyPost, RewardPreset } from '@/lib/parties';
 
 type PartyRow = {
   id: string;
@@ -14,6 +14,16 @@ type PartyRow = {
   leader_nickname: string;
   leader_hexa: number;
   leader_rate: number;
+  format_version: 'legacy' | 'role_contract_v2' | null;
+  required_party_rate: number | null;
+  main_capacity: number | null;
+  main_minimum_rate: number | null;
+  secondary_capacity: number | null;
+  secondary_minimum_rate: number | null;
+  reward_preset: RewardPreset | null;
+  secondary_crystal_share: number | null;
+  terms_version: number | null;
+  terms_locked_at: string | null;
   status: 'open' | 'full' | 'cancelled';
   created_at: string;
   member_count: number;
@@ -30,6 +40,9 @@ type MemberRow = {
   hexa_stat: number;
   verified_rate: number;
   role: 'leader' | 'member';
+  combat_role: CombatRole | null;
+  terms_version_agreed: number | null;
+  terms_agreed_at: string | null;
   joined_at: string;
 };
 
@@ -67,6 +80,9 @@ function memberFromRow(row: MemberRow): PartyMember {
     hexaStat: row.hexa_stat,
     verifiedRate: row.verified_rate,
     role: row.role,
+    combatRole: row.combat_role ?? undefined,
+    termsVersionAgreed: row.terms_version_agreed ?? undefined,
+    termsAgreedAt: row.terms_agreed_at ?? undefined,
     joinedAt: row.joined_at,
   };
 }
@@ -126,6 +142,16 @@ async function loadParties(partyId?: string) {
     leaderNickname: row.leader_nickname,
     leaderHexa: row.leader_hexa,
     leaderRate: row.leader_rate,
+    formatVersion: row.format_version === 'role_contract_v2' ? 'role_contract_v2' : 'legacy',
+    requiredPartyRate: row.required_party_rate ?? undefined,
+    mainCapacity: row.main_capacity ?? undefined,
+    mainMinimumRate: row.main_minimum_rate ?? undefined,
+    secondaryCapacity: row.secondary_capacity ?? undefined,
+    secondaryMinimumRate: row.secondary_minimum_rate ?? undefined,
+    rewardPreset: row.reward_preset ?? undefined,
+    secondaryCrystalShare: row.secondary_crystal_share ?? undefined,
+    termsVersion: row.terms_version ?? 1,
+    termsLockedAt: row.terms_locked_at ?? undefined,
     status: row.member_count >= row.capacity ? 'full' : row.status,
     createdAt: row.created_at,
     totalRate: row.total_rate,
@@ -201,14 +227,58 @@ export async function POST(request: Request) {
       if (!Number.isInteger(capacity) || capacity < 2 || capacity > boss.partyLimit) {
         throw new PartyRequestError(`모집 인원은 2명부터 최대 ${boss.partyLimit}명까지 선택할 수 있습니다.`);
       }
-      const minimumRate = numeric(body.minimumRate);
-      if (minimumRate < 1 || minimumRate > 1000) throw new PartyRequestError('최소 배율은 1%부터 1,000% 사이로 정해 주세요.');
+      const roleContract = textValue(body.formatVersion) === 'role_contract_v2';
+      const requiredPartyRate = roleContract ? numeric(body.requiredPartyRate) : undefined;
+      const mainCapacity = roleContract ? numeric(body.mainCapacity) : undefined;
+      const mainMinimumRate = roleContract ? numeric(body.mainMinimumRate) : undefined;
+      const secondaryCapacity = roleContract ? capacity - numeric(body.mainCapacity) : undefined;
+      const secondaryMinimumRate = roleContract ? numeric(body.secondaryMinimumRate) : undefined;
+      const rewardPreset = roleContract ? textValue(body.rewardPreset) as RewardPreset : undefined;
+      const secondaryCrystalShare = roleContract && rewardPreset === 'main_loot_adjusted_crystal'
+        ? numeric(body.secondaryCrystalShare)
+        : 100;
+      const leaderCombatRole = roleContract ? textValue(body.leaderCombatRole) as CombatRole : undefined;
+      if (roleContract) {
+        if (!requiredPartyRate || requiredPartyRate < 1 || requiredPartyRate > 1000) {
+          throw new PartyRequestError('목표 파티 배율은 1%부터 1,000% 사이로 정해 주세요.');
+        }
+        if (!Number.isInteger(mainCapacity) || !mainCapacity || mainCapacity < 1 || mainCapacity > capacity) {
+          throw new PartyRequestError('메인격수 자리 수를 확인해 주세요.');
+        }
+        if ((mainMinimumRate ?? 0) < 1 || (mainMinimumRate ?? 0) > 1000) {
+          throw new PartyRequestError('메인격수 최소 배율은 1%부터 1,000% 사이로 정해 주세요.');
+        }
+        if ((secondaryCapacity ?? 0) > 0 && ((secondaryMinimumRate ?? 0) < 1 || (secondaryMinimumRate ?? 0) > 1000)) {
+          throw new PartyRequestError('보조격수 최소 배율은 1%부터 1,000% 사이로 정해 주세요.');
+        }
+        if (!['equal_all', 'main_loot_equal_crystal', 'main_loot_adjusted_crystal'].includes(rewardPreset ?? '')) {
+          throw new PartyRequestError('보상 분배 방식을 확인해 주세요.');
+        }
+        if (secondaryCrystalShare < 0 || secondaryCrystalShare > 100) {
+          throw new PartyRequestError('보조격수 결정석 수령 비율은 0%부터 100% 사이로 정해 주세요.');
+        }
+        if (!['main_dealer', 'secondary_dealer'].includes(leaderCombatRole ?? '')) {
+          throw new PartyRequestError('파티장의 전투 역할을 선택해 주세요.');
+        }
+        if (leaderCombatRole === 'secondary_dealer' && !secondaryCapacity) {
+          throw new PartyRequestError('보조격수 자리가 없어 파티장을 보조격수로 지정할 수 없습니다.');
+        }
+      }
+      const minimumRate = roleContract
+        ? Math.min(mainMinimumRate ?? 1, (secondaryCapacity ?? 0) > 0 ? secondaryMinimumRate ?? 1 : mainMinimumRate ?? 1)
+        : numeric(body.minimumRate);
+      if (!roleContract && (minimumRate < 1 || minimumRate > 1000)) {
+        throw new PartyRequestError('최소 배율은 1%부터 1,000% 사이로 정해 주세요.');
+      }
       const departureAt = validateDeparture(body.departureAt);
       const nickname = textValue(body.nickname).trim();
       const hexaStat = numeric(body.hexaStat);
       const verified = await verifyCharacter(request, nickname, hexaStat, bossId);
-      if (verified.rate < minimumRate) {
-        throw new PartyRequestError(`파티장 배율 ${verified.rate.toFixed(2)}%가 최소 배율보다 낮습니다.`);
+      const leaderMinimumRate = roleContract
+        ? leaderCombatRole === 'main_dealer' ? mainMinimumRate ?? 0 : secondaryMinimumRate ?? 0
+        : minimumRate;
+      if (verified.rate < leaderMinimumRate) {
+        throw new PartyRequestError(`파티장 배율 ${verified.rate.toFixed(2)}%가 선택한 역할의 최소 배율보다 낮습니다.`);
       }
 
       const database = partyDatabase();
@@ -219,20 +289,27 @@ export async function POST(request: Request) {
         database.prepare(`
           INSERT INTO parties (
             id, boss_id, boss_name, difficulty, capacity, minimum_rate, departure_at,
-            leader_nickname, leader_hexa, leader_rate, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+            leader_nickname, leader_hexa, leader_rate, format_version, required_party_rate,
+            main_capacity, main_minimum_rate, secondary_capacity, secondary_minimum_rate,
+            reward_preset, secondary_crystal_share, terms_version, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', ?)
         `).bind(
           partyId, boss.id, boss.name, boss.difficulty, capacity, minimumRate, departureAt,
-          nickname, hexaStat, verified.rate, createdAt,
+          nickname, hexaStat, verified.rate, roleContract ? 'role_contract_v2' : 'legacy',
+          requiredPartyRate ?? null, mainCapacity ?? null, mainMinimumRate ?? null,
+          secondaryCapacity ?? null, secondaryMinimumRate ?? null, rewardPreset ?? null,
+          secondaryCrystalShare ?? null, createdAt,
         ),
         database.prepare(`
           INSERT INTO party_members (
             id, party_id, nickname, character_class, character_level,
-            character_image, hexa_stat, verified_rate, role, joined_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?)
+            character_image, hexa_stat, verified_rate, role, combat_role,
+            terms_version_agreed, terms_agreed_at, joined_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?, ?, ?, ?)
         `).bind(
           memberId, partyId, nickname, verified.profile.characterClass, verified.profile.level,
-          verified.profile.image ?? null, hexaStat, verified.rate, createdAt,
+          verified.profile.image ?? null, hexaStat, verified.rate, leaderCombatRole ?? null,
+          roleContract ? 1 : null, roleContract ? createdAt : null, createdAt,
         ),
       ]);
       return Response.json({ party: (await loadParties(partyId))[0] }, { status: 201 });
@@ -251,35 +328,85 @@ export async function POST(request: Request) {
       if (currentParty.members.some((member) => member.nickname === nickname)) {
         throw new PartyRequestError('이미 이 파티에 가입한 캐릭터입니다.', 409);
       }
+      const roleContract = currentParty.formatVersion === 'role_contract_v2';
+      const combatRole = roleContract ? textValue(body.combatRole) as CombatRole : undefined;
+      const termsVersion = roleContract ? numeric(body.termsVersion) : undefined;
+      if (roleContract) {
+        if (!['main_dealer', 'secondary_dealer'].includes(combatRole ?? '')) {
+          throw new PartyRequestError('가입할 전투 역할을 선택해 주세요.');
+        }
+        if (body.termsAccepted !== true) throw new PartyRequestError('보상 약정을 확인하고 동의해 주세요.');
+        if (termsVersion !== currentParty.termsVersion) {
+          throw new PartyRequestError('파티 조건이 변경되었습니다. 최신 약정을 다시 확인해 주세요.', 409);
+        }
+        const roleCapacity = combatRole === 'main_dealer' ? currentParty.mainCapacity ?? 0 : currentParty.secondaryCapacity ?? 0;
+        const roleMemberCount = currentParty.members.filter((member) => member.combatRole === combatRole).length;
+        if (roleMemberCount >= roleCapacity) throw new PartyRequestError('선택한 역할의 모집이 완료되었습니다.', 409);
+      }
       const verified = await verifyCharacter(request, nickname, hexaStat, currentParty.bossId);
-      if (verified.rate < currentParty.minimumRate) {
-        throw new PartyRequestError(`가입 배율 ${verified.rate.toFixed(2)}%가 최소 ${currentParty.minimumRate.toFixed(2)}%보다 낮습니다.`, 403);
+      const roleMinimumRate = roleContract
+        ? combatRole === 'main_dealer' ? currentParty.mainMinimumRate ?? 0 : currentParty.secondaryMinimumRate ?? 0
+        : currentParty.minimumRate;
+      if (verified.rate < roleMinimumRate) {
+        throw new PartyRequestError(`가입 배율 ${verified.rate.toFixed(2)}%가 선택한 역할의 최소 ${roleMinimumRate.toFixed(2)}%보다 낮습니다.`, 403);
       }
 
       const database = partyDatabase();
       const joinedAt = new Date().toISOString();
       try {
-        const result = await database.prepare(`
-          INSERT INTO party_members (
-            id, party_id, nickname, character_class, character_level,
-            character_image, hexa_stat, verified_rate, role, joined_at
-          )
-          SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?
-          FROM parties p
-          WHERE p.id = ?
-            AND p.status = 'open'
-            AND p.departure_at > ?
-            AND ? >= p.minimum_rate
-            AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
-        `).bind(
-          crypto.randomUUID(), nickname, verified.profile.characterClass, verified.profile.level,
-          verified.profile.image ?? null, hexaStat, verified.rate, joinedAt, partyId, joinedAt, verified.rate,
-        ).run();
+        const result = roleContract
+          ? await database.prepare(`
+              INSERT INTO party_members (
+                id, party_id, nickname, character_class, character_level,
+                character_image, hexa_stat, verified_rate, role, combat_role,
+                terms_version_agreed, terms_agreed_at, joined_at
+              )
+              SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?
+              FROM parties p
+              WHERE p.id = ?
+                AND p.status = 'open'
+                AND p.departure_at > ?
+                AND p.format_version = 'role_contract_v2'
+                AND p.terms_version = ?
+                AND ? >= p.${combatRole === 'main_dealer' ? 'main_minimum_rate' : 'secondary_minimum_rate'}
+                AND (
+                  SELECT COUNT(*) FROM party_members m
+                  WHERE m.party_id = p.id AND m.combat_role = ?
+                ) < p.${combatRole === 'main_dealer' ? 'main_capacity' : 'secondary_capacity'}
+                AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
+            `).bind(
+              crypto.randomUUID(), nickname, verified.profile.characterClass, verified.profile.level,
+              verified.profile.image ?? null, hexaStat, verified.rate, combatRole, termsVersion,
+              joinedAt, joinedAt, partyId, joinedAt, termsVersion, verified.rate, combatRole,
+            ).run()
+          : await database.prepare(`
+              INSERT INTO party_members (
+                id, party_id, nickname, character_class, character_level,
+                character_image, hexa_stat, verified_rate, role, joined_at
+              )
+              SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?
+              FROM parties p
+              WHERE p.id = ?
+                AND p.status = 'open'
+                AND p.departure_at > ?
+                AND ? >= p.minimum_rate
+                AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
+            `).bind(
+              crypto.randomUUID(), nickname, verified.profile.characterClass, verified.profile.level,
+              verified.profile.image ?? null, hexaStat, verified.rate, joinedAt, partyId, joinedAt, verified.rate,
+            ).run();
         if (!result.meta.changes) throw new PartyRequestError('모집이 마감되었거나 가입 조건이 변경되었습니다.', 409);
       } catch (error) {
         if (error instanceof PartyRequestError) throw error;
         if (error instanceof Error && /UNIQUE/i.test(error.message)) throw new PartyRequestError('이미 이 파티에 가입한 캐릭터입니다.', 409);
         throw error;
+      }
+      if (roleContract) {
+        await database.prepare(`
+          UPDATE parties
+          SET terms_locked_at = COALESCE(terms_locked_at, ?)
+          WHERE id = ?
+        `).bind(joinedAt, partyId).run();
       }
       await database.prepare(`
         UPDATE parties

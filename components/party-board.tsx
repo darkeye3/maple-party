@@ -2,9 +2,10 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, ChevronDown, CircleUserRound, LayoutGrid, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Crown, LayoutGrid, Plus, RefreshCw, ShieldCheck, Swords, Target, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -12,7 +13,7 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
 import type { BossResult, CharacterProfile } from '@/lib/model';
-import type { PartyActionResponse, PartyPost } from '@/lib/parties';
+import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
 const difficultyStyles: Record<string, { active: string; idle: string }> = {
@@ -24,6 +25,12 @@ const difficultyStyles: Record<string, { active: string; idle: string }> = {
   이지: { active: 'border-[#35a46d] bg-[#35a46d] text-white', idle: 'border-[#a5d9bf] bg-[#effaf4] text-[#237b50]' },
   챔피언: { active: 'border-[#d28a22] bg-[#d28a22] text-white', idle: 'border-[#ebca91] bg-[#fff8eb] text-[#a86a12]' },
 };
+
+const rewardOptions: { value: RewardPreset; title: string; description: string }[] = [
+  { value: 'equal_all', title: '공평 분배', description: '전원 물욕템 참여 · 결정석 1/N' },
+  { value: 'main_loot_equal_crystal', title: '보조격수 동행', description: '물욕템 메인만 · 결정석 전원 1/N' },
+  { value: 'main_loot_adjusted_crystal', title: '보조격수 정산', description: '물욕템 메인만 · 보조 결정석 일부 정산' },
+];
 
 type PartyBoardProps = {
   profile: CharacterProfile;
@@ -59,6 +66,53 @@ function departureLabel(value: string) {
 
 function rateLabel(value: number) {
   return value >= 100 ? `${value.toFixed(1)}%` : `${value.toFixed(2)}%`;
+}
+
+function isRoleContract(party: PartyPost) {
+  return party.formatVersion === 'role_contract_v2';
+}
+
+function roleLabel(role: CombatRole) {
+  return role === 'main_dealer' ? '메인격수' : '보조격수';
+}
+
+function roleCapacity(party: PartyPost, role: CombatRole) {
+  return role === 'main_dealer' ? party.mainCapacity ?? 0 : party.secondaryCapacity ?? 0;
+}
+
+function roleMinimumRate(party: PartyPost, role: CombatRole) {
+  return role === 'main_dealer' ? party.mainMinimumRate ?? 0 : party.secondaryMinimumRate ?? 0;
+}
+
+function roleMemberCount(party: PartyPost, role: CombatRole) {
+  return party.members.filter((member) => member.combatRole === role).length;
+}
+
+function roleHasSeat(party: PartyPost, role: CombatRole) {
+  return party.status === 'open' && roleMemberCount(party, role) < roleCapacity(party, role);
+}
+
+function availableRoleForRate(party: PartyPost, rate: number | undefined) {
+  if (!isRoleContract(party)) return party.status === 'open' && party.members.length < party.capacity && (rate ?? 0) >= party.minimumRate;
+  return (['main_dealer', 'secondary_dealer'] as CombatRole[]).some((role) => (
+    roleHasSeat(party, role) && (rate ?? 0) >= roleMinimumRate(party, role)
+  ));
+}
+
+function rewardLabel(party: PartyPost) {
+  if (party.rewardPreset === 'equal_all') return '물욕 전원 · 결정석 1/N';
+  if (party.rewardPreset === 'main_loot_adjusted_crystal') return `물욕 메인 · 보조 ${party.secondaryCrystalShare ?? 0}%`;
+  return '물욕 메인 · 결정석 1/N';
+}
+
+function memberRewardSummary(party: PartyPost, role: CombatRole) {
+  if (party.rewardPreset === 'equal_all') return '물욕템 분배에 참여하고 결정석은 전원 1/N으로 정산합니다.';
+  if (role === 'main_dealer') return '물욕템 분배에 참여하고 결정석은 1/N으로 정산합니다.';
+  if (party.rewardPreset === 'main_loot_adjusted_crystal') {
+    const share = party.secondaryCrystalShare ?? 0;
+    return `물욕템 분배에는 참여하지 않으며, 결정석 1/N 몫의 ${share}%를 받고 ${100 - share}%를 정산합니다.`;
+  }
+  return '물욕템 분배에는 참여하지 않으며, 결정석은 1/N으로 정산합니다.';
 }
 
 async function fetchPartyList(signal?: AbortSignal) {
@@ -103,9 +157,20 @@ export function PartyBoard({
   const [bossId, setBossId] = useState(difficultyOptions[0]?.id ?? '');
   const selectedBoss = partyBosses.find((boss) => boss.id === bossId) ?? difficultyOptions[0];
   const [capacity, setCapacity] = useState('6');
-  const [minimumRate, setMinimumRate] = useState('50');
+  const [requiredPartyRate, setRequiredPartyRate] = useState('130');
+  const [mainCapacity, setMainCapacity] = useState('2');
+  const [mainMinimumRate, setMainMinimumRate] = useState('40');
+  const [secondaryMinimumRate, setSecondaryMinimumRate] = useState('15');
+  const [leaderCombatRole, setLeaderCombatRole] = useState<CombatRole>('main_dealer');
+  const [rewardPreset, setRewardPreset] = useState<RewardPreset>('main_loot_equal_crystal');
+  const [secondaryCrystalShare, setSecondaryCrystalShare] = useState('70');
+  const [selectedJoinRole, setSelectedJoinRole] = useState<CombatRole>('main_dealer');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [departureAt, setDepartureAt] = useState(localDateTimeValue());
   const selectedCapacity = Math.min(Math.max(Number(capacity) || 2, 2), selectedBoss?.partyLimit ?? 2);
+  const selectedMainCapacity = Math.min(Math.max(Number(mainCapacity) || 1, 1), selectedCapacity);
+  const selectedSecondaryCapacity = selectedCapacity - selectedMainCapacity;
+  const effectiveLeaderCombatRole = selectedSecondaryCapacity > 0 ? leaderCombatRole : 'main_dealer';
   const createBossOptions = useMemo(() => bossNames.map((name) => {
     const options = partyBosses.filter((boss) => boss.name === name);
     const image = options.find((boss) => boss.image)?.image;
@@ -201,12 +266,14 @@ export function PartyBoard({
     const departingSoonLimit = departingSoonReference + DEPARTING_SOON_MS;
 
     return parties.filter((party) => {
-      const hasSeat = party.status === 'open' && party.members.length < party.capacity;
+      const hasSeat = isRoleContract(party)
+        ? roleHasSeat(party, 'main_dealer') || roleHasSeat(party, 'secondary_dealer')
+        : party.status === 'open' && party.members.length < party.capacity;
       const departureTime = new Date(party.departureAt).getTime();
       const canJoinParty = profileMatchesNickname
         && hasSeat
         && !party.members.some((member) => member.nickname === nicknameValue)
-        && (myRates.get(party.bossId) ?? 0) >= party.minimumRate;
+        && availableRoleForRate(party, myRates.get(party.bossId));
 
       if (bossFilter !== 'all' && party.bossName !== bossFilter) return false;
       if (activeDifficultyFilter !== 'all' && party.difficulty !== activeDifficultyFilter) return false;
@@ -244,9 +311,16 @@ export function PartyBoard({
     try {
       const party = await postAction({
         action: 'create',
+        formatVersion: 'role_contract_v2',
         bossId: selectedBoss.id,
         capacity: selectedCapacity,
-        minimumRate: Number(minimumRate),
+        requiredPartyRate: Number(requiredPartyRate),
+        mainCapacity: selectedMainCapacity,
+        mainMinimumRate: Number(mainMinimumRate),
+        secondaryMinimumRate: Number(secondaryMinimumRate),
+        leaderCombatRole: effectiveLeaderCombatRole,
+        rewardPreset,
+        secondaryCrystalShare: Number(secondaryCrystalShare),
         departureAt: new Date(departureAt).toISOString(),
         nickname: nickname.trim(),
         hexaStat,
@@ -273,9 +347,13 @@ export function PartyBoard({
         partyId: selectedParty.id,
         nickname: nickname.trim(),
         hexaStat,
+        combatRole: isRoleContract(selectedParty) ? selectedJoinRole : undefined,
+        termsVersion: selectedParty.termsVersion,
+        termsAccepted: isRoleContract(selectedParty) ? termsAccepted : undefined,
       });
       setParties((current) => current.map((item) => item.id === party.id ? party : item));
       setSelectedParty(party);
+      setTermsAccepted(false);
       setNotice(`${party.difficulty} ${party.bossName} 파티에 가입했습니다.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '파티에 가입하지 못했습니다.');
@@ -301,19 +379,35 @@ export function PartyBoard({
 
   function openDetail(party: PartyPost) {
     setSelectedParty(party);
+    const myRate = myRates.get(party.bossId);
+    const preferredRole = isRoleContract(party)
+      ? (['main_dealer', 'secondary_dealer'] as CombatRole[]).find((role) => (
+          roleHasSeat(party, role) && (myRate ?? 0) >= roleMinimumRate(party, role)
+        )) ?? (roleHasSeat(party, 'main_dealer') ? 'main_dealer' : 'secondary_dealer')
+      : 'main_dealer';
+    setSelectedJoinRole(preferredRole);
+    setTermsAccepted(false);
     setNotice('');
     setDetailOpen(true);
   }
 
   const selectedMyRate = selectedParty ? myRates.get(selectedParty.bossId) : undefined;
   const alreadyJoined = selectedParty?.members.some((member) => member.nickname === nickname.trim()) ?? false;
+  const selectedRoleMinimum = selectedParty && isRoleContract(selectedParty)
+    ? roleMinimumRate(selectedParty, selectedJoinRole)
+    : selectedParty?.minimumRate ?? 0;
+  const selectedRoleHasSeat = selectedParty && isRoleContract(selectedParty)
+    ? roleHasSeat(selectedParty, selectedJoinRole)
+    : Boolean(selectedParty && selectedParty.status === 'open' && selectedParty.members.length < selectedParty.capacity);
   const canJoin = Boolean(
     selectedParty
     && selectedParty.status === 'open'
     && selectedParty.members.length < selectedParty.capacity
+    && selectedRoleHasSeat
     && !alreadyJoined
     && profileMatchesNickname
-    && (selectedMyRate ?? 0) >= selectedParty.minimumRate,
+    && (selectedMyRate ?? 0) >= selectedRoleMinimum
+    && (!isRoleContract(selectedParty) || termsAccepted),
   );
 
   return (
@@ -416,7 +510,10 @@ export function PartyBoard({
             {visibleParties.map((party) => {
               const boss = partyBosses.find((item) => item.id === party.bossId);
               const myRate = myRates.get(party.bossId);
-              const eligible = profileMatchesNickname && (myRate ?? 0) >= party.minimumRate;
+              const eligible = profileMatchesNickname && availableRoleForRate(party, myRate);
+              const roleContract = isRoleContract(party);
+              const targetRate = party.requiredPartyRate ?? 0;
+              const readiness = targetRate > 0 ? Math.min(999, party.totalRate / targetRate * 100) : 0;
               return (
                 <article key={party.id} className="rounded-lg border border-[#dfe2e8] bg-white p-4">
                   <div className="flex items-start gap-3">
@@ -430,11 +527,16 @@ export function PartyBoard({
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
-                    <div><p className="text-[10px] text-[#818894]">최소 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums">{rateLabel(party.minimumRate)}</p></div>
-                    <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums text-[#1f5ed5]">{rateLabel(party.totalRate)}</p></div>
+                    <div><p className="text-[10px] text-[#818894]">{roleContract ? '목표 배율' : '최소 배율'}</p><p className="mt-0.5 text-sm font-bold tabular-nums">{rateLabel(roleContract ? targetRate : party.minimumRate)}</p></div>
+                    <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums text-[#1f5ed5]">{rateLabel(party.totalRate)}</p>{roleContract && <p className="mt-0.5 text-[9px] text-[#818894]">준비도 {readiness.toFixed(0)}%</p>}</div>
                     <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold tabular-nums">{party.members.length}/{party.capacity}</p></div>
                     <div><p className="text-[10px] text-[#818894]">내 배율</p><p className={`mt-0.5 text-sm font-bold tabular-nums ${eligible ? 'text-emerald-700' : 'text-[#687080]'}`}>{profileMatchesNickname && myRate != null ? rateLabel(myRate) : '-'}</p></div>
                   </div>
+                  {roleContract && <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                    <Badge variant="outline" className="rounded-sm border-[#f0c78c] bg-[#fff8eb] text-[#9a650f]">메인 {roleMemberCount(party, 'main_dealer')}/{party.mainCapacity} · {rateLabel(party.mainMinimumRate ?? 0)}+</Badge>
+                    {(party.secondaryCapacity ?? 0) > 0 && <Badge variant="outline" className="rounded-sm border-[#a9c7ed] bg-[#f1f6ff] text-[#285da7]">보조 {roleMemberCount(party, 'secondary_dealer')}/{party.secondaryCapacity} · {rateLabel(party.secondaryMinimumRate ?? 0)}+</Badge>}
+                    <Badge variant="outline" className="rounded-sm border-[#d7dbe2] bg-[#f8f9fa] text-[#59616e]">{rewardLabel(party)}</Badge>
+                  </div>}
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <p className="min-w-0 truncate text-xs text-[#737b87]">파티장 <strong className="text-[#454c57]">{party.leaderNickname}</strong></p>
                     <Button type="button" variant="outline" size="sm" onClick={() => openDetail(party)} className="h-8 rounded-md border-[#ccd1d9] text-xs"><Users className="size-3.5" />상세 보기</Button>
@@ -451,8 +553,8 @@ export function PartyBoard({
       </section>
 
       <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) setBossPickerOpen(false); }}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-lg">
-          <DialogHeader><DialogTitle>파티 만들기</DialogTitle><DialogDescription>파티장 배율도 같은 최소 조건으로 서버에서 다시 확인합니다.</DialogDescription></DialogHeader>
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-xl">
+          <DialogHeader><DialogTitle>파티 만들기</DialogTitle><DialogDescription>역할별 배율과 보상 조건을 정하면 가입 시 서버에서 그대로 확인합니다.</DialogDescription></DialogHeader>
           <form onSubmit={createParty} className="space-y-4">
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -518,12 +620,31 @@ export function PartyBoard({
               </fieldset>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label htmlFor="party-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">총 인원<NativeSelect id="party-capacity" value={String(selectedCapacity)} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(0, (selectedBoss?.partyLimit ?? 2) - 1) }, (_, index) => index + 2).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
-              <label htmlFor="party-minimum-rate" className="space-y-1.5 text-xs font-semibold text-[#535b68]">최소 배율<Input id="party-minimum-rate" type="number" min="1" max="1000" step="0.1" value={minimumRate} onChange={(event) => setMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
-            </div>
+            <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
+              <div className="flex items-center justify-between gap-3"><div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Target className="size-3.5 text-[#eb5b35]" />20분 목표</h3><p className="mt-0.5 text-[11px] text-[#858c97]">파티 합산 배율이 도달할 목표입니다.</p></div><div className="flex gap-1">{['110', '130', '150'].map((rate) => <Button key={rate} type="button" variant="outline" size="sm" onClick={() => setRequiredPartyRate(rate)} className={`h-7 rounded-sm px-2 text-[11px] ${requiredPartyRate === rate ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : ''}`}>{rate}%</Button>)}</div></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label htmlFor="party-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">총 인원<NativeSelect id="party-capacity" value={String(selectedCapacity)} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(0, (selectedBoss?.partyLimit ?? 2) - 1) }, (_, index) => index + 2).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
+                <label htmlFor="party-target-rate" className="space-y-1.5 text-xs font-semibold text-[#535b68]">목표 파티 배율<Input id="party-target-rate" type="number" min="1" max="1000" step="1" value={requiredPartyRate} onChange={(event) => setRequiredPartyRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+              </div>
+            </section>
+
+            <section className="space-y-3 border-t border-[#e3e6eb] pt-4">
+              <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Swords className="size-3.5 text-[#eb5b35]" />역할별 자리</h3><p className="mt-0.5 text-[11px] text-[#858c97]">메인격수 수를 정하면 남은 자리는 보조격수가 됩니다.</p></div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label htmlFor="party-main-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인격수<NativeSelect id="party-main-capacity" value={String(selectedMainCapacity)} onChange={(event) => setMainCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: selectedCapacity }, (_, index) => index + 1).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
+                <label htmlFor="party-main-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인 최소 배율<Input id="party-main-minimum" type="number" min="1" max="1000" step="0.1" value={mainMinimumRate} onChange={(event) => setMainMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+                <label htmlFor="party-secondary-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">보조 {selectedSecondaryCapacity}명 · 최소<Input id="party-secondary-minimum" disabled={!selectedSecondaryCapacity} type="number" min="1" max="1000" step="0.1" value={secondaryMinimumRate} onChange={(event) => setSecondaryMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+              </div>
+              <fieldset className="space-y-1.5"><legend className="text-xs font-semibold text-[#535b68]">파티장 역할</legend><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={effectiveLeaderCombatRole === 'main_dealer'} onClick={() => setLeaderCombatRole('main_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold ${effectiveLeaderCombatRole === 'main_dealer' ? 'border-[#d28a22] bg-[#fff8eb] text-[#98620f]' : 'border-[#d7dbe2] text-[#626a77]'}`}><Crown className="size-3.5" />메인격수</button><button type="button" disabled={!selectedSecondaryCapacity} aria-pressed={effectiveLeaderCombatRole === 'secondary_dealer'} onClick={() => setLeaderCombatRole('secondary_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${effectiveLeaderCombatRole === 'secondary_dealer' ? 'border-[#4d83c6] bg-[#f1f6ff] text-[#285da7]' : 'border-[#d7dbe2] text-[#626a77]'}`}><ShieldCheck className="size-3.5" />보조격수</button></div></fieldset>
+            </section>
+
+            <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
+              <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Coins className="size-3.5 text-[#eb5b35]" />보상 약정</h3><p className="mt-0.5 text-[11px] text-[#858c97]">첫 파티원이 가입하면 이 조건은 잠깁니다.</p></div>
+              <div className="grid gap-2">{rewardOptions.map((option) => <button key={option.value} type="button" aria-pressed={rewardPreset === option.value} onClick={() => setRewardPreset(option.value)} className={`flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 py-2 text-left ${rewardPreset === option.value ? 'border-[#eb5b35] bg-[#fff5f1]' : 'border-[#dfe2e8] bg-white hover:border-[#bec4ce]'}`}><span><strong className={`block text-xs ${rewardPreset === option.value ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{option.title}</strong><span className="mt-0.5 block text-[11px] text-[#7a818d]">{option.description}</span></span>{rewardPreset === option.value && <Check className="size-4 shrink-0 text-[#eb5b35]" />}</button>)}</div>
+              {rewardPreset === 'main_loot_adjusted_crystal' && <label htmlFor="party-secondary-share" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">보조격수 결정석 수령 비율<Input id="party-secondary-share" type="number" min="0" max="100" step="1" value={secondaryCrystalShare} onChange={(event) => setSecondaryCrystalShare(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /><span className="block font-normal text-[#858c97]">{Number(secondaryCrystalShare) || 0}% 수령 · {Math.max(0, 100 - (Number(secondaryCrystalShare) || 0))}% 정산</span></label>}
+            </section>
             <label htmlFor="party-departure" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">출발 시간<Input id="party-departure" type="datetime-local" value={departureAt} onChange={(event) => setDepartureAt(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
-            <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs text-[#687080]">파티장 {nickname || '-'} · 헥환 {hexaStat.toLocaleString()} · 선택 보스 배율 {selectedBoss ? rateLabel(selectedBoss.rate) : '-'}</div>
+            <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs leading-5 text-[#687080]">파티장 {nickname || '-'} · {roleLabel(effectiveLeaderCombatRole)} · 헥환 {hexaStat.toLocaleString()}<br />현재 {selectedBoss ? rateLabel(selectedBoss.rate) : '-'} · 목표 {rateLabel(Number(requiredPartyRate) || 0)} · 메인 {selectedMainCapacity}명 / 보조 {selectedSecondaryCapacity}명</div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setCreateOpen(false)} className="rounded-md">취소</Button><Button type="submit" disabled={submitting} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">{submitting ? '검증 중' : '모집 시작'}</Button></DialogFooter>
           </form>
         </DialogContent>
@@ -532,13 +653,27 @@ export function PartyBoard({
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-lg">
           {selectedParty && <>
-            <DialogHeader><DialogTitle>{selectedParty.difficulty} {selectedParty.bossName}</DialogTitle><DialogDescription>{departureLabel(selectedParty.departureAt)} 출발 · 최소 {rateLabel(selectedParty.minimumRate)}</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>{selectedParty.difficulty} {selectedParty.bossName}</DialogTitle><DialogDescription>{departureLabel(selectedParty.departureAt)} 출발 · {isRoleContract(selectedParty) ? `목표 ${rateLabel(selectedParty.requiredPartyRate ?? 0)}` : `최소 ${rateLabel(selectedParty.minimumRate)}`}</DialogDescription></DialogHeader>
             <div className="grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
               <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold">{selectedParty.members.length}/{selectedParty.capacity}</p></div>
               <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold text-[#1f5ed5]">{rateLabel(selectedParty.totalRate)}</p></div>
-              <div><p className="text-[10px] text-[#818894]">내 배율</p><p className="mt-0.5 text-sm font-bold">{selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
-              <div><p className="text-[10px] text-[#818894]">남은 자리</p><p className="mt-0.5 text-sm font-bold">{Math.max(0, selectedParty.capacity - selectedParty.members.length)}명</p></div>
+              <div><p className="text-[10px] text-[#818894]">{isRoleContract(selectedParty) ? '목표 배율' : '내 배율'}</p><p className="mt-0.5 text-sm font-bold">{isRoleContract(selectedParty) ? rateLabel(selectedParty.requiredPartyRate ?? 0) : selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
+              <div><p className="text-[10px] text-[#818894]">{isRoleContract(selectedParty) ? '준비도' : '남은 자리'}</p><p className="mt-0.5 text-sm font-bold">{isRoleContract(selectedParty) ? `${Math.min(999, selectedParty.totalRate / (selectedParty.requiredPartyRate || 1) * 100).toFixed(0)}%` : `${Math.max(0, selectedParty.capacity - selectedParty.members.length)}명`}</p></div>
             </div>
+            {isRoleContract(selectedParty) && <section className="space-y-2">
+              <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-[#535b68]">가입 역할</p><p className="text-[11px] text-[#818894]">내 배율 {selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
+              <div className="grid grid-cols-2 gap-2">
+                {(['main_dealer', 'secondary_dealer'] as CombatRole[]).filter((role) => roleCapacity(selectedParty, role) > 0).map((role) => {
+                  const selected = selectedJoinRole === role;
+                  const hasSeat = roleHasSeat(selectedParty, role);
+                  const qualified = (selectedMyRate ?? 0) >= roleMinimumRate(selectedParty, role);
+                  return <button key={role} type="button" disabled={alreadyJoined || !hasSeat} aria-pressed={selected} onClick={() => { setSelectedJoinRole(role); setTermsAccepted(false); }} className={`min-h-[62px] rounded-md border px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-45 ${selected ? role === 'main_dealer' ? 'border-[#d28a22] bg-[#fff8eb]' : 'border-[#4d83c6] bg-[#f1f6ff]' : 'border-[#dfe2e8] bg-white'}`}>
+                    <span className="flex items-center justify-between gap-2"><strong className="text-xs">{roleLabel(role)}</strong><span className="text-[10px] text-[#7a818d]">{roleMemberCount(selectedParty, role)}/{roleCapacity(selectedParty, role)}</span></span>
+                    <span className={`mt-1 block text-[11px] ${qualified ? 'text-emerald-700' : 'text-[#7a818d]'}`}>최소 {rateLabel(roleMinimumRate(selectedParty, role))}{!hasSeat ? ' · 마감' : qualified ? ' · 가입 가능' : ''}</span>
+                  </button>;
+                })}
+              </div>
+            </section>}
             <div>
               <p className="mb-2 text-xs font-semibold text-[#535b68]">참가자</p>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -552,6 +687,7 @@ export function PartyBoard({
                       <div className="flex items-center justify-center gap-2">
                         <h3 className="min-w-0 truncate text-base font-bold">{member.nickname}</h3>
                         {member.role === 'leader' && <Badge variant="outline" className="shrink-0 rounded-sm border-amber-200 bg-amber-50 text-amber-700">파티장</Badge>}
+                        {member.combatRole && <Badge variant="outline" className={`shrink-0 rounded-sm ${member.combatRole === 'main_dealer' ? 'border-[#f0c78c] bg-[#fff8eb] text-[#9a650f]' : 'border-[#a9c7ed] bg-[#f1f6ff] text-[#285da7]'}`}>{roleLabel(member.combatRole)}</Badge>}
                       </div>
                       <p className="mt-1 text-xs text-[#747b88]">{member.characterClass} · Lv.{member.characterLevel}</p>
                       <div className="mt-3 space-y-1.5 border-t border-[#eceef1] pt-3 text-xs">
@@ -563,10 +699,15 @@ export function PartyBoard({
                 })}
               </div>
             </div>
+            {isRoleContract(selectedParty) && <section className="border-y border-[#e3e6eb] py-3">
+              <div className="flex items-center justify-between gap-3"><p className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Coins className="size-3.5 text-[#eb5b35]" />보상 약정</p><Badge variant="outline" className="rounded-sm border-[#d7dbe2] bg-[#f8f9fa] text-[10px] text-[#59616e]">버전 {selectedParty.termsVersion}{selectedParty.termsLockedAt ? ' · 잠김' : ''}</Badge></div>
+              <p className="mt-2 text-xs leading-5 text-[#59616e]">{memberRewardSummary(selectedParty, selectedJoinRole)}</p>
+              {!alreadyJoined && <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md bg-[#f7f8fa] px-3 py-2.5 text-xs leading-5 text-[#454c57]"><Checkbox checked={termsAccepted} onCheckedChange={setTermsAccepted} className="mt-0.5 data-checked:border-[#eb5b35] data-checked:bg-[#eb5b35]" /><span>위 {roleLabel(selectedJoinRole)} 조건과 보상 약정을 확인했으며 동의합니다.</span></label>}
+            </section>}
             <div className={`rounded-md border px-3 py-2 text-xs ${canJoin ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-[#dfe2e8] bg-[#fafbfc] text-[#687080]'}`}>
-              {alreadyJoined ? '이미 이 파티에 참가 중입니다.' : !profileMatchesNickname ? '현재 닉네임을 먼저 조회해 주세요.' : selectedParty.status === 'full' ? '모집이 완료된 파티입니다.' : canJoin ? <span className="flex items-center gap-1.5"><UserRoundCheck className="size-4" />가입 조건을 충족합니다.</span> : `내 배율이 최소 조건보다 ${rateLabel(Math.max(0, selectedParty.minimumRate - (selectedMyRate ?? 0)))} 부족합니다.`}
+              {alreadyJoined ? '이미 이 파티에 참가 중입니다.' : !profileMatchesNickname ? '현재 닉네임을 먼저 조회해 주세요.' : selectedParty.status === 'full' ? '모집이 완료된 파티입니다.' : !selectedRoleHasSeat ? '선택한 역할의 모집이 완료되었습니다.' : (selectedMyRate ?? 0) < selectedRoleMinimum ? `내 배율이 선택한 역할의 최소 조건보다 ${rateLabel(Math.max(0, selectedRoleMinimum - (selectedMyRate ?? 0)))} 부족합니다.` : isRoleContract(selectedParty) && !termsAccepted ? '보상 약정을 확인하고 동의해 주세요.' : canJoin ? <span className="flex items-center gap-1.5"><UserRoundCheck className="size-4" />가입 조건을 충족합니다.</span> : '가입 조건을 다시 확인해 주세요.'}
             </div>
-            <DialogFooter><Button type="button" variant="outline" onClick={() => setDetailOpen(false)} className="rounded-md">닫기</Button><Button type="button" disabled={!canJoin || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]"><Check className="size-4" />{submitting ? '검증 중' : '가입하기'}</Button></DialogFooter>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setDetailOpen(false)} className="rounded-md">닫기</Button><Button type="button" disabled={!canJoin || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]"><Check className="size-4" />{submitting ? '검증 중' : isRoleContract(selectedParty) ? `${roleLabel(selectedJoinRole)}로 가입` : '가입하기'}</Button></DialogFooter>
           </>}
         </DialogContent>
       </Dialog>
