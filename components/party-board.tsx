@@ -218,6 +218,7 @@ export function PartyBoard({
   const selectedBossSelectionAsset = bossSelectionAsset(selectedBoss?.name ?? bossName, selectedBoss?.image);
   const [capacity, setCapacity] = useState('6');
   const [requiredPartyRate, setRequiredPartyRate] = useState('130');
+  const [secondaryEnabled, setSecondaryEnabled] = useState(false);
   const [mainCapacity, setMainCapacity] = useState('2');
   const [mainMinimumRate, setMainMinimumRate] = useState('40');
   const [secondaryMinimumRate, setSecondaryMinimumRate] = useState('15');
@@ -229,9 +230,16 @@ export function PartyBoard({
   const [departureBounds, setDepartureBounds] = useState(createDepartureBounds);
   const [departureAt, setDepartureAt] = useState(localDateTimeValue());
   const selectedCapacity = Math.min(Math.max(Number(capacity) || 2, 2), selectedBoss?.partyLimit ?? 2);
-  const selectedMainCapacity = Math.min(Math.max(Number(mainCapacity) || 1, 1), selectedCapacity);
-  const selectedSecondaryCapacity = selectedCapacity - selectedMainCapacity;
+  const selectedMainCapacity = secondaryEnabled
+    ? Math.min(Math.max(Number(mainCapacity) || 1, 1), Math.max(1, selectedCapacity - 1))
+    : selectedCapacity;
+  const selectedSecondaryCapacity = secondaryEnabled ? selectedCapacity - selectedMainCapacity : 0;
   const effectiveLeaderCombatRole = selectedSecondaryCapacity > 0 ? leaderCombatRole : 'main_dealer';
+  const effectiveRewardPreset: RewardPreset = secondaryEnabled ? rewardPreset : 'equal_all';
+  const effectiveSecondaryMinimumRate = secondaryEnabled ? Number(secondaryMinimumRate) : 0;
+  const effectiveSecondaryCrystalShare = secondaryEnabled && effectiveRewardPreset === 'main_loot_adjusted_crystal'
+    ? Number(secondaryCrystalShare)
+    : 100;
   const createBossOptions = useMemo(() => bossNames.map((name) => {
     const options = partyBosses.filter((boss) => boss.name === name);
     const image = options.find((boss) => boss.image)?.image;
@@ -388,10 +396,10 @@ export function PartyBoard({
         requiredPartyRate: Number(requiredPartyRate),
         mainCapacity: selectedMainCapacity,
         mainMinimumRate: Number(mainMinimumRate),
-        secondaryMinimumRate: Number(secondaryMinimumRate),
+        secondaryMinimumRate: effectiveSecondaryMinimumRate,
         leaderCombatRole: effectiveLeaderCombatRole,
-        rewardPreset,
-        secondaryCrystalShare: Number(secondaryCrystalShare),
+        rewardPreset: effectiveRewardPreset,
+        secondaryCrystalShare: effectiveSecondaryCrystalShare,
         departureAt: new Date(departureAt).toISOString(),
         nickname: nickname.trim(),
         hexaStat,
@@ -446,6 +454,8 @@ export function PartyBoard({
     const suggested = localDateTimeValue();
     setDepartureBounds(bounds);
     setDepartureAt(suggested < bounds.min ? bounds.min : suggested > bounds.max ? bounds.max : suggested);
+    setSecondaryEnabled(false);
+    setLeaderCombatRole('main_dealer');
     setBossPickerOpen(false);
     setNotice('');
     setCreateOpen(true);
@@ -703,19 +713,48 @@ export function PartyBoard({
             </section>
 
             <section className="space-y-3 border-t border-[#e3e6eb] pt-4">
-              <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Swords className="size-3.5 text-[#eb5b35]" />역할별 자리</h3><p className="mt-0.5 text-[11px] text-[#858c97]">메인격수 수를 정하면 남은 자리는 보조격수가 됩니다.</p></div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label htmlFor="party-main-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인격수<NativeSelect id="party-main-capacity" value={String(selectedMainCapacity)} onChange={(event) => setMainCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: selectedCapacity }, (_, index) => index + 1).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
-                <label htmlFor="party-main-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인 최소 배율<Input id="party-main-minimum" type="number" min="1" max="1000" step="0.1" value={mainMinimumRate} onChange={(event) => setMainMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
-                <label htmlFor="party-secondary-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">보조 {selectedSecondaryCapacity}명 · 최소<Input id="party-secondary-minimum" disabled={!selectedSecondaryCapacity} type="number" min="1" max="1000" step="0.1" value={secondaryMinimumRate} onChange={(event) => setSecondaryMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Swords className="size-3.5 text-[#eb5b35]" />역할별 자리</h3><p className="mt-0.5 text-[11px] text-[#858c97]">{secondaryEnabled ? '메인격수 수를 정하면 남은 자리는 보조격수가 됩니다.' : '전원 메인격수 기준으로 모집합니다.'}</p></div>
+                <Toggle
+                  pressed={secondaryEnabled}
+                  onPressedChange={(pressed) => {
+                    setSecondaryEnabled(pressed);
+                    if (!pressed) setLeaderCombatRole('main_dealer');
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className={`h-8 rounded-md px-3 text-xs font-bold ${secondaryEnabled ? 'border-[#4d83c6] bg-[#f1f6ff] text-[#285da7]' : 'border-[#d7dbe2] bg-white text-[#626a77]'}`}
+                >
+                  <ShieldCheck className="size-3.5" />보조격수 모집
+                </Toggle>
               </div>
-              <fieldset className="space-y-1.5"><legend className="text-xs font-semibold text-[#535b68]">파티장 역할</legend><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={effectiveLeaderCombatRole === 'main_dealer'} onClick={() => setLeaderCombatRole('main_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold ${effectiveLeaderCombatRole === 'main_dealer' ? 'border-[#d28a22] bg-[#fff8eb] text-[#98620f]' : 'border-[#d7dbe2] text-[#626a77]'}`}><Crown className="size-3.5" />메인격수</button><button type="button" disabled={!selectedSecondaryCapacity} aria-pressed={effectiveLeaderCombatRole === 'secondary_dealer'} onClick={() => setLeaderCombatRole('secondary_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${effectiveLeaderCombatRole === 'secondary_dealer' ? 'border-[#4d83c6] bg-[#f1f6ff] text-[#285da7]' : 'border-[#d7dbe2] text-[#626a77]'}`}><ShieldCheck className="size-3.5" />보조격수</button></div></fieldset>
+              <div className={`grid gap-3 ${secondaryEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                {secondaryEnabled ? (
+                  <label htmlFor="party-main-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인격수<NativeSelect id="party-main-capacity" value={String(selectedMainCapacity)} onChange={(event) => setMainCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(1, selectedCapacity - 1) }, (_, index) => index + 1).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
+                ) : (
+                  <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2">
+                    <span className="block text-xs font-semibold text-[#535b68]">메인격수</span>
+                    <strong className="mt-1 block text-sm text-[#151922]">{selectedMainCapacity}명</strong>
+                  </div>
+                )}
+                <label htmlFor="party-main-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">메인 최소 배율<Input id="party-main-minimum" type="number" min="1" max="1000" step="0.1" value={mainMinimumRate} onChange={(event) => setMainMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+                {secondaryEnabled && <label htmlFor="party-secondary-minimum" className="space-y-1.5 text-xs font-semibold text-[#535b68]">보조 {selectedSecondaryCapacity}명 · 최소<Input id="party-secondary-minimum" type="number" min="1" max="1000" step="0.1" value={secondaryMinimumRate} onChange={(event) => setSecondaryMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>}
+              </div>
+              {secondaryEnabled && <fieldset className="space-y-1.5"><legend className="text-xs font-semibold text-[#535b68]">파티장 역할</legend><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={effectiveLeaderCombatRole === 'main_dealer'} onClick={() => setLeaderCombatRole('main_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold ${effectiveLeaderCombatRole === 'main_dealer' ? 'border-[#d28a22] bg-[#fff8eb] text-[#98620f]' : 'border-[#d7dbe2] text-[#626a77]'}`}><Crown className="size-3.5" />메인격수</button><button type="button" aria-pressed={effectiveLeaderCombatRole === 'secondary_dealer'} onClick={() => setLeaderCombatRole('secondary_dealer')} className={`flex h-10 items-center justify-center gap-1.5 rounded-md border text-xs font-bold ${effectiveLeaderCombatRole === 'secondary_dealer' ? 'border-[#4d83c6] bg-[#f1f6ff] text-[#285da7]' : 'border-[#d7dbe2] text-[#626a77]'}`}><ShieldCheck className="size-3.5" />보조격수</button></div></fieldset>}
             </section>
 
             <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
               <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Coins className="size-3.5 text-[#eb5b35]" />보상 약정</h3><p className="mt-0.5 text-[11px] text-[#858c97]">첫 파티원이 가입하면 이 조건은 잠깁니다.</p></div>
-              <div className="grid gap-2">{rewardOptions.map((option) => <button key={option.value} type="button" aria-pressed={rewardPreset === option.value} onClick={() => setRewardPreset(option.value)} className={`flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 py-2 text-left ${rewardPreset === option.value ? 'border-[#eb5b35] bg-[#fff5f1]' : 'border-[#dfe2e8] bg-white hover:border-[#bec4ce]'}`}><span><strong className={`block text-xs ${rewardPreset === option.value ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{option.title}</strong><span className="mt-0.5 block text-[11px] text-[#7a818d]">{option.description}</span></span>{rewardPreset === option.value && <Check className="size-4 shrink-0 text-[#eb5b35]" />}</button>)}</div>
-              {rewardPreset === 'main_loot_adjusted_crystal' && <label htmlFor="party-secondary-share" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">보조격수 결정석 수령 비율<Input id="party-secondary-share" type="number" min="0" max="100" step="1" value={secondaryCrystalShare} onChange={(event) => setSecondaryCrystalShare(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /><span className="block font-normal text-[#858c97]">{Number(secondaryCrystalShare) || 0}% 수령 · {Math.max(0, 100 - (Number(secondaryCrystalShare) || 0))}% 정산</span></label>}
+              {secondaryEnabled ? (
+                <>
+                  <div className="grid gap-2">{rewardOptions.map((option) => <button key={option.value} type="button" aria-pressed={rewardPreset === option.value} onClick={() => setRewardPreset(option.value)} className={`flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 py-2 text-left ${rewardPreset === option.value ? 'border-[#eb5b35] bg-[#fff5f1]' : 'border-[#dfe2e8] bg-white hover:border-[#bec4ce]'}`}><span><strong className={`block text-xs ${rewardPreset === option.value ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{option.title}</strong><span className="mt-0.5 block text-[11px] text-[#7a818d]">{option.description}</span></span>{rewardPreset === option.value && <Check className="size-4 shrink-0 text-[#eb5b35]" />}</button>)}</div>
+                  {rewardPreset === 'main_loot_adjusted_crystal' && <label htmlFor="party-secondary-share" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">보조격수 결정석 수령 비율<Input id="party-secondary-share" type="number" min="0" max="100" step="1" value={secondaryCrystalShare} onChange={(event) => setSecondaryCrystalShare(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /><span className="block font-normal text-[#858c97]">{Number(secondaryCrystalShare) || 0}% 수령 · {Math.max(0, 100 - (Number(secondaryCrystalShare) || 0))}% 정산</span></label>}
+                </>
+              ) : (
+                <div className="flex min-h-12 items-center justify-between gap-3 rounded-md border border-[#eb5b35] bg-[#fff5f1] px-3 py-2 text-left">
+                  <span><strong className="block text-xs text-[#c74928]">공평 분배</strong><span className="mt-0.5 block text-[11px] text-[#7a818d]">전원 물욕템 참여 · 결정석 1/N</span></span><Check className="size-4 shrink-0 text-[#eb5b35]" />
+                </div>
+              )}
             </section>
             <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
               <div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><CalendarClock className="size-3.5 text-[#eb5b35]" />출발 시간</h3><p className="text-[10px] text-[#858c97]">{departureBounds.min.slice(0, 10)} ~ {departureBounds.max.slice(0, 10)}</p></div>
@@ -725,7 +764,7 @@ export function PartyBoard({
                 <label htmlFor="party-departure-minute" className="space-y-1.5 text-xs font-semibold text-[#535b68]">분<NativeSelect id="party-departure-minute" value={departureAt.slice(14, 16)} onChange={(event) => updateDeparturePart('minute', event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: 6 }, (_, index) => String(index * 10).padStart(2, '0')).map((minute) => <NativeSelectOption key={minute} value={minute}>{minute}분</NativeSelectOption>)}</NativeSelect></label>
               </div>
             </section>
-            <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs leading-5 text-[#687080]">파티장 {nickname || '-'} · {roleLabel(effectiveLeaderCombatRole)} · 헥환 {hexaStat.toLocaleString()}<br />현재 {selectedBoss ? rateLabel(selectedBoss.rate) : '-'} · 목표 {rateLabel(Number(requiredPartyRate) || 0)} · 메인 {selectedMainCapacity}명 / 보조 {selectedSecondaryCapacity}명</div>
+            <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs leading-5 text-[#687080]">파티장 {nickname || '-'} · {roleLabel(effectiveLeaderCombatRole)} · 헥환 {hexaStat.toLocaleString()}<br />현재 {selectedBoss ? rateLabel(selectedBoss.rate) : '-'} · 목표 {rateLabel(Number(requiredPartyRate) || 0)} · {secondaryEnabled ? `메인 ${selectedMainCapacity}명 / 보조 ${selectedSecondaryCapacity}명` : `메인 ${selectedMainCapacity}명`}</div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setCreateOpen(false)} className="rounded-md">취소</Button><Button type="submit" disabled={submitting} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">{submitting ? '검증 중' : '모집 시작'}</Button></DialogFooter>
           </form>
         </DialogContent>
