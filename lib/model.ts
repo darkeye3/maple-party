@@ -108,7 +108,7 @@ export type EngineSummary = {
 
 export const REFERENCE_HEXA = 83_583;
 export const ENGINE_VERSION = 'Bishop Character Curve 2026.08 v4';
-export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-08-15';
+export const BOSS_TABLE_VERSION = 'MapleScouter KMS 2026-09-01';
 
 export const REFERENCE_PROFILE: CharacterProfile = {
   nickname: '팸귄',
@@ -151,12 +151,14 @@ const spline380: Spline = {
 };
 
 const bosses: BossDefinition[] = [
+  { id: 'hard-jupiter', name: '유피테르', difficulty: '하드', image: '/bosses/hard_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 0.457793180966654, guard: 380 },
   { id: 'extreme-kaling', name: '카링', difficulty: '익스트림', image: '/bosses/extreme_kaling.png', level: 285, authenticForce: 480, partyLimit: 6, partyBossCut: 108350, easyRate: 0.997841787071066, guard: 380, partyBoss: true },
   { id: 'extreme-kalos', name: '감시자 칼로스', difficulty: '익스트림', image: '/bosses/extreme_kalos.png', level: 285, authenticForce: 440, partyLimit: 6, bossCut: 90900, easyRate: 0.22694444444444445, guard: 380 },
-  { id: 'hard-bellona', name: '벨로나', difficulty: '하드', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 128200, easyRate: 1.05, guard: 380 },
+  { id: 'hard-bellona', name: '벨로나', difficulty: '하드', image: '/bosses/hard_bellona.png', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 128200, easyRate: 1.05, guard: 380 },
   { id: 'destiny-limbo', name: '림보', difficulty: '데스티니', image: '/bosses/destiny_limbo.png', level: 285, authenticForce: 500, partyLimit: 1, bossCut: 118900, easyRate: 0.95, guard: 380 },
   { id: 'hard-limbo', name: '림보', difficulty: '하드', image: '/bosses/hard_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, bossCut: 118900, easyRate: 0.95, guard: 380 },
   { id: 'hard-malefic', name: '흉성', difficulty: '하드', image: '/bosses/hard_maleficStar.png', level: 280, authenticForce: 550, partyLimit: 3, bossCut: 117500, easyRate: 0.95, guard: 380 },
+  { id: 'normal-jupiter', name: '유피테르', difficulty: '노멀', image: '/bosses/normal_jupiter.png', level: 295, authenticForce: 810, partyLimit: 3, bossCut: 128200, easyRate: 2.10033692027366, guard: 380 },
   { id: 'destiny-adversary', name: '대적자', difficulty: '데스티니', image: '/bosses/destiny_adversary.png', level: 285, authenticForce: 340, partyLimit: 1, bossCut: 108100, easyRate: 0.76, guard: 380 },
   { id: 'hard-adversary', name: '대적자', difficulty: '하드', image: '/bosses/hard_adversary.png', level: 285, authenticForce: 340, partyLimit: 3, bossCut: 108100, easyRate: 0.95, guard: 380 },
   { id: 'hard-kaling', name: '카링', difficulty: '하드', image: '/bosses/hard_kaling.png', level: 285, authenticForce: 350, partyLimit: 6, bossCut: 105800, easyRate: 0.95, guard: 380 },
@@ -166,7 +168,7 @@ const bosses: BossDefinition[] = [
   { id: 'normal-limbo', name: '림보', difficulty: '노멀', image: '/bosses/normal_limbo.png', level: 285, authenticForce: 500, partyLimit: 3, bossCut: 118900, easyRate: 1.8890409456118664, guard: 380 },
   { id: 'destiny-kalos', name: '감시자 칼로스', difficulty: '데스티니', image: '/bosses/destiny_kalos.png', level: 285, authenticForce: 330, partyLimit: 1, bossCut: 90900, easyRate: 0.95, guard: 380 },
   { id: 'chaos-kalos', name: '감시자 칼로스', difficulty: '카오스', image: '/bosses/chaos_kalos.png', level: 285, authenticForce: 330, partyLimit: 6, bossCut: 90900, easyRate: 0.95, guard: 380 },
-  { id: 'normal-bellona', name: '벨로나', difficulty: '노멀', level: 280, authenticForce: 450, partyLimit: 3, bossCut: 128200, easyRate: 3.5570596797671037, guard: 380 },
+  { id: 'normal-bellona', name: '벨로나', difficulty: '노멀', image: '/bosses/normal_bellona.png', level: 280, authenticForce: 450, partyLimit: 3, bossCut: 128200, easyRate: 3.5570596797671037, guard: 380 },
   { id: 'destiny-seren', name: '선택받은 세렌', difficulty: '데스티니', image: '/bosses/destiny_seren.png', level: 275, authenticForce: 200, partyLimit: 1, bossCut: 105700, easyRate: 2.4048764911816405, guard: 380 },
   { id: 'normal-kaling', name: '카링', difficulty: '노멀', image: '/bosses/normal_kaling.png', level: 285, authenticForce: 330, partyLimit: 6, bossCut: 105800, easyRate: 2.7877201738381996, guard: 380 },
   { id: 'normal-malefic', name: '흉성', difficulty: '노멀', image: '/bosses/normal_maleficStar.png', level: 280, authenticForce: 400, partyLimit: 3, bossCut: 117500, easyRate: 4.297226209857768, guard: 380 },
@@ -174,7 +176,7 @@ const bosses: BossDefinition[] = [
   { id: 'champion-kalos', name: '감시자 칼로스', difficulty: '챔피언', image: '/bosses/champion_kalos.png', level: 280, authenticForce: 300, partyLimit: 1, bossCut: 90900, easyRate: 3.1766295474321242, guard: 380 },
   { id: 'normal-adversary', name: '대적자', difficulty: '노멀', image: '/bosses/normal_adversary.png', level: 280, authenticForce: 320, partyLimit: 3, bossCut: 108100, easyRate: 6.114009582055534, guard: 380 },
   { id: 'normal-kalos', name: '감시자 칼로스', difficulty: '노멀', image: '/bosses/normal_kalos.png', level: 280, authenticForce: 300, partyLimit: 6, bossCut: 90900, easyRate: 4.538042210617321, guard: 380 },
-  { id: 'easy-bellona', name: '벨로나', difficulty: '이지', level: 280, authenticForce: 400, partyLimit: 3, bossCut: 128200, easyRate: 18.821822849807447, guard: 380 },
+  { id: 'easy-bellona', name: '벨로나', difficulty: '이지', image: '/bosses/easy_bellona.png', level: 280, authenticForce: 400, partyLimit: 3, bossCut: 128200, easyRate: 18.821822849807447, guard: 380 },
   { id: 'champion-seren', name: '선택받은 세렌', difficulty: '챔피언', image: '/bosses/champion_seren.png', level: 275, authenticForce: 200, partyLimit: 1, bossCut: 105700, easyRate: 8.41706771913574, guard: 380 },
   { id: 'easy-kaling', name: '카링', difficulty: '이지', image: '/bosses/easy_kaling.png', level: 275, authenticForce: 230, partyLimit: 6, bossCut: 105800, easyRate: 10.810543864615774, guard: 380 },
   { id: 'hard-seren', name: '선택받은 세렌', difficulty: '하드', image: '/bosses/hard_seren.png', level: 275, authenticForce: 200, partyLimit: 6, bossCut: 105700, easyRate: 12.024382455908201, guard: 380 },

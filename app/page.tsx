@@ -65,7 +65,7 @@ export default function Home() {
   const [filter, setFilter] = useState<Filter>('range');
   const [sort, setSort] = useState<Sort>('site');
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState('2026-08-15 보스컷 표와 실제 스플라인 배율식을 적용했습니다.');
+  const [notice, setNotice] = useState(`${BOSS_TABLE_VERSION.replace('MapleScouter KMS ', '')} 보스컷 표와 실제 스플라인 배율식을 적용했습니다.`);
   const [noticeKind, setNoticeKind] = useState<NoticeKind>('info');
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
@@ -323,7 +323,7 @@ export default function Home() {
                     {boss.image ? (
                       <Image src={boss.image} alt={`${boss.difficulty} ${boss.name}`} width={76} height={76} className="size-[76px] shrink-0 rounded-md border border-[#d8dce2] object-cover" />
                     ) : (
-                      <div className="grid size-[76px] shrink-0 place-items-center rounded-md border border-[#d8dce2] bg-[#252a32] px-2 text-center text-xs font-bold text-white">벨로나</div>
+                      <div className="grid size-[76px] shrink-0 place-items-center rounded-md border border-[#d8dce2] bg-[#252a32] px-2 text-center text-xs font-bold text-white">{boss.name}</div>
                     )}
                     <div className="min-w-0 flex-1 pt-0.5">
                       <p className="truncate text-[11px] font-bold uppercase text-[#d85432]">{boss.difficulty}</p>
