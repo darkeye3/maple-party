@@ -2,17 +2,28 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, CircleUserRound, LayoutGrid, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, LayoutGrid, Plus, RefreshCw, ShieldCheck, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { PartyActionResponse, PartyPost } from '@/lib/parties';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
+const difficultyStyles: Record<string, { active: string; idle: string }> = {
+  익스트림: { active: 'border-[#e55c37] bg-[#e55c37] text-white', idle: 'border-[#f1b4a4] bg-[#fff3ef] text-[#c84725]' },
+  데스티니: { active: 'border-[#7155c5] bg-[#7155c5] text-white', idle: 'border-[#c8bcec] bg-[#f5f2ff] text-[#5a3cad]' },
+  카오스: { active: 'border-[#9850ac] bg-[#9850ac] text-white', idle: 'border-[#d7b7df] bg-[#faf2fc] text-[#7c378e]' },
+  하드: { active: 'border-[#c63b67] bg-[#c63b67] text-white', idle: 'border-[#e8aabd] bg-[#fff0f5] text-[#a9254e]' },
+  노멀: { active: 'border-[#36abc4] bg-[#36abc4] text-white', idle: 'border-[#9fd7e3] bg-[#edfafd] text-[#18829a]' },
+  이지: { active: 'border-[#35a46d] bg-[#35a46d] text-white', idle: 'border-[#a5d9bf] bg-[#effaf4] text-[#237b50]' },
+  챔피언: { active: 'border-[#d28a22] bg-[#d28a22] text-white', idle: 'border-[#ebca91] bg-[#fff8eb] text-[#a86a12]' },
+};
 
 type PartyBoardProps = {
   profile: CharacterProfile;
@@ -84,6 +95,7 @@ export function PartyBoard({
   const [departingSoonOnly, setDepartingSoonOnly] = useState(false);
   const [departingSoonReference, setDepartingSoonReference] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [bossPickerOpen, setBossPickerOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<PartyPost | null>(null);
   const [bossName, setBossName] = useState(bossNames[0] ?? '');
@@ -94,6 +106,11 @@ export function PartyBoard({
   const [minimumRate, setMinimumRate] = useState('50');
   const [departureAt, setDepartureAt] = useState(localDateTimeValue());
   const selectedCapacity = Math.min(Math.max(Number(capacity) || 2, 2), selectedBoss?.partyLimit ?? 2);
+  const createBossOptions = useMemo(() => bossNames.map((name) => {
+    const options = partyBosses.filter((boss) => boss.name === name);
+    const image = options.find((boss) => boss.image)?.image;
+    return { name, image };
+  }), [bossNames, partyBosses]);
 
   async function refreshParties() {
     setListLoading(true);
@@ -148,6 +165,7 @@ export function PartyBoard({
   function changeBossName(value: string) {
     setBossName(value);
     setBossId(partyBosses.find((boss) => boss.name === value)?.id ?? '');
+    setBossPickerOpen(false);
   }
 
   const myRates = useMemo(() => new Map(partyBosses.map((boss) => [boss.id, boss.rate])), [partyBosses]);
@@ -272,6 +290,7 @@ export function PartyBoard({
       return;
     }
     setDepartureAt(localDateTimeValue());
+    setBossPickerOpen(false);
     setNotice('');
     setCreateOpen(true);
   }
@@ -427,13 +446,75 @@ export function PartyBoard({
         )}
       </section>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="rounded-lg sm:max-w-lg">
+      <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) setBossPickerOpen(false); }}>
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-lg">
           <DialogHeader><DialogTitle>파티 만들기</DialogTitle><DialogDescription>파티장 배율도 같은 최소 조건으로 서버에서 다시 확인합니다.</DialogDescription></DialogHeader>
           <form onSubmit={createParty} className="space-y-4">
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <p id="party-boss-label" className="text-xs font-semibold text-[#535b68]">보스</p>
+                <Popover open={bossPickerOpen} onOpenChange={setBossPickerOpen}>
+                  <PopoverTrigger
+                    aria-labelledby="party-boss-label"
+                    className="flex h-[72px] w-full items-center gap-3 rounded-md border border-[#ccd1d9] bg-white px-3 text-left outline-none transition-colors hover:border-[#9fa6b1] focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30"
+                  >
+                    {selectedBoss?.image
+                      ? <Image src={selectedBoss.image} alt="" width={54} height={54} className="size-[54px] shrink-0 rounded-md border border-[#d7dbe2] object-cover" />
+                      : <span className="grid size-[54px] shrink-0 place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{bossName}</span>}
+                    <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-[#8a919d]">선택한 보스</span><strong className="mt-0.5 block truncate text-sm text-[#252a32]">{bossName}</strong></span>
+                    <ChevronDown className={`size-4 shrink-0 text-[#747b88] transition-transform ${bossPickerOpen ? 'rotate-180' : ''}`} />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" sideOffset={6} className="w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[#d7dbe2] bg-white p-3 shadow-xl">
+                    <PopoverHeader className="px-1 pb-1"><PopoverTitle className="text-sm font-bold">보스 선택</PopoverTitle></PopoverHeader>
+                    <ScrollArea className="h-[292px] pr-2">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {createBossOptions.map((boss) => {
+                          const selected = bossName === boss.name;
+                          return (
+                            <button
+                              key={boss.name}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => changeBossName(boss.name)}
+                              className={`relative flex min-h-[92px] flex-col items-center justify-center gap-1.5 rounded-md border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff4ef]' : 'border-[#dfe2e8] bg-white hover:border-[#b6bcc6] hover:bg-[#fafbfc]'}`}
+                            >
+                              {boss.image
+                                ? <Image src={boss.image} alt="" width={58} height={58} className="size-[58px] rounded-md border border-[#d7dbe2] object-cover" />
+                                : <span className="grid size-[58px] place-items-center rounded-md bg-[#252a32] px-1 text-[10px] font-bold text-white">{boss.name}</span>}
+                              <span className={`w-full truncate text-xs font-bold ${selected ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{boss.name}</span>
+                              {selected && <span className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-[#eb5b35] text-white"><Check className="size-3" /></span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <fieldset className="space-y-1.5">
+                <legend className="text-xs font-semibold text-[#535b68]">난이도</legend>
+                <div className="flex flex-wrap gap-2">
+                  {difficultyOptions.map((boss) => {
+                    const selected = selectedBoss?.id === boss.id;
+                    const style = difficultyStyles[boss.difficulty] ?? { active: 'border-[#343a44] bg-[#343a44] text-white', idle: 'border-[#cdd1d8] bg-[#f7f8f9] text-[#535b68]' };
+                    return (
+                      <button
+                        key={boss.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setBossId(boss.id)}
+                        className={`h-9 min-w-[82px] rounded-full border px-4 text-xs font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? style.active : style.idle}`}
+                      >
+                        {boss.difficulty}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-2">
-              <label htmlFor="party-boss" className="space-y-1.5 text-xs font-semibold text-[#535b68]">보스<NativeSelect id="party-boss" value={bossName} onChange={(event) => changeBossName(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{bossNames.map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
-              <label htmlFor="party-difficulty" className="space-y-1.5 text-xs font-semibold text-[#535b68]">난이도<NativeSelect id="party-difficulty" value={selectedBoss?.id ?? ''} onChange={(event) => setBossId(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{difficultyOptions.map((boss) => <NativeSelectOption key={boss.id} value={boss.id}>{boss.difficulty}</NativeSelectOption>)}</NativeSelect></label>
               <label htmlFor="party-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">총 인원<NativeSelect id="party-capacity" value={String(selectedCapacity)} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(0, (selectedBoss?.partyLimit ?? 2) - 1) }, (_, index) => index + 2).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
               <label htmlFor="party-minimum-rate" className="space-y-1.5 text-xs font-semibold text-[#535b68]">최소 배율<Input id="party-minimum-rate" type="number" min="1" max="1000" step="0.1" value={minimumRate} onChange={(event) => setMinimumRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
             </div>
