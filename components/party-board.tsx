@@ -40,11 +40,17 @@ const difficultyStyles: Record<string, { active: string; idle: string }> = {
   이지: { active: 'border-[#35a46d] bg-[#35a46d] text-white', idle: 'border-[#a5d9bf] bg-[#effaf4] text-[#237b50]' },
   챔피언: { active: 'border-[#d28a22] bg-[#d28a22] text-white', idle: 'border-[#ebca91] bg-[#fff8eb] text-[#a86a12]' },
 };
-const partyDifficultyOrder = ['이지', '노멀', '하드', '카오스', '데스티니', '익스트림', '챔피언'];
+const partyDifficultyOrder = ['익스트림', '데스티니', '카오스', '하드', '노멀', '이지', '챔피언'];
 
 function partyDifficultyRank(difficulty: string) {
   const index = partyDifficultyOrder.indexOf(difficulty);
   return index === -1 ? partyDifficultyOrder.length : index;
+}
+
+function comparePartyDifficulty(a: BossResult, b: BossResult) {
+  const byPersonalRate = a.rate - b.rate;
+  if (Math.abs(byPersonalRate) > 0.001) return byPersonalRate;
+  return partyDifficultyRank(a.difficulty) - partyDifficultyRank(b.difficulty);
 }
 
 const rewardOptions: { value: RewardPreset; title: string; description: string }[] = [
@@ -221,7 +227,7 @@ export function PartyBoard({
   const difficultyOptions = useMemo(() => (
     partyBosses
       .filter((boss) => boss.name === bossName)
-      .sort((a, b) => partyDifficultyRank(a.difficulty) - partyDifficultyRank(b.difficulty))
+      .sort(comparePartyDifficulty)
   ), [bossName, partyBosses]);
   const [bossId, setBossId] = useState(difficultyOptions[0]?.id ?? '');
   const selectedBoss = partyBosses.find((boss) => boss.id === bossId) ?? difficultyOptions[0];
@@ -315,7 +321,7 @@ export function PartyBoard({
     setBossName(value);
     const firstDifficulty = partyBosses
       .filter((boss) => boss.name === value)
-      .sort((a, b) => partyDifficultyRank(a.difficulty) - partyDifficultyRank(b.difficulty))[0];
+      .sort(comparePartyDifficulty)[0];
     setBossId(firstDifficulty?.id ?? '');
     setBossPickerOpen(false);
   }
