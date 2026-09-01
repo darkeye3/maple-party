@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Crown, LayoutGrid, Plus, RefreshCw, ShieldCheck, Swords, Target, UserRoundCheck, Users } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Crown, LayoutGrid, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -381,7 +381,7 @@ export function PartyBoard({
     setDifficultyFilter('all');
   }
 
-  async function postAction(payload: Record<string, unknown>) {
+  async function postPartyAction(payload: Record<string, unknown>) {
     const response = await fetch('/api/parties', {
       method: 'POST',
       headers: {
@@ -391,7 +391,13 @@ export function PartyBoard({
       body: JSON.stringify(payload),
     });
     const data = await response.json() as PartyActionResponse;
-    if (!response.ok || !data.party) throw new Error(data.error ?? '파티 요청을 처리하지 못했습니다.');
+    if (!response.ok) throw new Error(data.error ?? '파티 요청을 처리하지 못했습니다.');
+    return data;
+  }
+
+  async function postAction(payload: Record<string, unknown>) {
+    const data = await postPartyAction(payload);
+    if (!data.party) throw new Error(data.error ?? '파티 요청을 처리하지 못했습니다.');
     return data.party;
   }
 
@@ -454,6 +460,53 @@ export function PartyBoard({
     }
   }
 
+  async function leaveParty() {
+    if (!selectedParty) return;
+    if (!window.confirm(`${selectedParty.difficulty} ${selectedParty.bossName} 파티에서 탈퇴할까요?`)) return;
+    setSubmitting(true);
+    setNotice('');
+    try {
+      const data = await postPartyAction({
+        action: 'leave',
+        partyId: selectedParty.id,
+        nickname: nickname.trim(),
+        hexaStat,
+      });
+      if (!data.party) throw new Error(data.error ?? '파티 탈퇴 결과를 확인하지 못했습니다.');
+      const updatedParty = data.party;
+      setParties((current) => current.map((item) => item.id === updatedParty.id ? updatedParty : item));
+      setSelectedParty(updatedParty);
+      setNotice(`${updatedParty.difficulty} ${updatedParty.bossName} 파티에서 탈퇴했습니다.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '파티에서 탈퇴하지 못했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function deleteParty() {
+    if (!selectedParty) return;
+    if (!window.confirm(`${selectedParty.difficulty} ${selectedParty.bossName} 모집 글을 삭제할까요?`)) return;
+    setSubmitting(true);
+    setNotice('');
+    try {
+      const data = await postPartyAction({
+        action: 'delete',
+        partyId: selectedParty.id,
+        nickname: nickname.trim(),
+        hexaStat,
+      });
+      setParties((current) => data.parties ?? current.filter((item) => item.id !== selectedParty.id));
+      setSelectedParty(null);
+      setDetailOpen(false);
+      setNotice(`${selectedParty.difficulty} ${selectedParty.bossName} 모집 글을 삭제했습니다.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '모집 글을 삭제하지 못했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function openCreate() {
     if (!profileMatchesNickname) {
       setNotice('파티를 만들기 전에 현재 닉네임의 배율을 갱신해 주세요.');
@@ -489,7 +542,10 @@ export function PartyBoard({
   }
 
   const selectedMyRate = selectedParty ? myRates.get(selectedParty.bossId) : undefined;
-  const alreadyJoined = selectedParty?.members.some((member) => member.nickname === nickname.trim()) ?? false;
+  const selectedMember = selectedParty?.members.find((member) => member.nickname === nickname.trim());
+  const alreadyJoined = Boolean(selectedMember);
+  const canDeleteParty = Boolean(selectedParty && profileMatchesNickname && selectedMember?.role === 'leader');
+  const canLeaveParty = Boolean(selectedParty && profileMatchesNickname && selectedMember?.role === 'member');
   const selectedRoleMinimum = selectedParty && isRoleContract(selectedParty)
     ? roleMinimumRate(selectedParty, selectedJoinRole)
     : selectedParty?.minimumRate ?? 0;
@@ -840,7 +896,16 @@ export function PartyBoard({
             <div className={`rounded-md border px-3 py-2 text-xs ${canJoin ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-[#dfe2e8] bg-[#fafbfc] text-[#687080]'}`}>
               {alreadyJoined ? '이미 이 파티에 참가 중입니다.' : !profileMatchesNickname ? '현재 닉네임을 먼저 조회해 주세요.' : selectedParty.status === 'full' ? '모집이 완료된 파티입니다.' : !selectedRoleHasSeat ? '선택한 역할의 모집이 완료되었습니다.' : (selectedMyRate ?? 0) < selectedRoleMinimum ? `내 배율이 선택한 역할의 최소 조건보다 ${rateLabel(Math.max(0, selectedRoleMinimum - (selectedMyRate ?? 0)))} 부족합니다.` : isRoleContract(selectedParty) && !termsAccepted ? '보상 약정을 확인하고 동의해 주세요.' : canJoin ? <span className="flex items-center gap-1.5"><UserRoundCheck className="size-4" />가입 조건을 충족합니다.</span> : '가입 조건을 다시 확인해 주세요.'}
             </div>
-            <DialogFooter><Button type="button" variant="outline" onClick={() => setDetailOpen(false)} className="rounded-md">닫기</Button><Button type="button" disabled={!canJoin || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]"><Check className="size-4" />{submitting ? '검증 중' : isRoleContract(selectedParty) ? `${roleLabel(selectedJoinRole)}로 가입` : '가입하기'}</Button></DialogFooter>
+            <DialogFooter className="items-stretch sm:items-center sm:justify-between">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                {canDeleteParty && <Button type="button" variant="destructive" disabled={submitting} onClick={() => void deleteParty()} className="rounded-md"><Trash2 className="size-4" />{submitting ? '삭제 중' : '모집 삭제'}</Button>}
+                {canLeaveParty && <Button type="button" variant="outline" disabled={submitting} onClick={() => void leaveParty()} className="rounded-md border-[#f0b8aa] text-[#c74928] hover:bg-[#fff1ec]"><LogOut className="size-4" />{submitting ? '탈퇴 중' : '파티 탈퇴'}</Button>}
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => setDetailOpen(false)} className="rounded-md">닫기</Button>
+                {!alreadyJoined && <Button type="button" disabled={!canJoin || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]"><Check className="size-4" />{submitting ? '검증 중' : isRoleContract(selectedParty) ? `${roleLabel(selectedJoinRole)}로 가입` : '가입하기'}</Button>}
+              </div>
+            </DialogFooter>
           </>}
         </DialogContent>
       </Dialog>

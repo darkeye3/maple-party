@@ -417,6 +417,62 @@ export async function POST(request: Request) {
       return Response.json({ party: (await loadParties(partyId))[0] });
     }
 
+    if (action === 'leave') {
+      const partyId = textValue(body.partyId);
+      const currentParty = (await loadParties(partyId))[0];
+      if (!currentParty) throw new PartyRequestError('모집 글을 찾을 수 없습니다.', 404);
+      if (currentParty.status === 'cancelled') throw new PartyRequestError('이미 삭제된 모집 글입니다.', 409);
+      const nickname = textValue(body.nickname).trim();
+      const hexaStat = numeric(body.hexaStat);
+      const member = currentParty.members.find((item) => item.nickname === nickname);
+      if (!member) throw new PartyRequestError('이 파티에 참가 중인 캐릭터가 아닙니다.', 404);
+      if (member.role === 'leader') throw new PartyRequestError('파티장은 탈퇴 대신 모집 삭제를 이용해 주세요.', 403);
+      await verifyCharacter(request, nickname, hexaStat, currentParty.bossId);
+
+      const database = partyDatabase();
+      const leftAt = new Date().toISOString();
+      const result = await database.prepare(`
+        DELETE FROM party_members
+        WHERE party_id = ?
+          AND nickname = ?
+          AND role = 'member'
+      `).bind(partyId, nickname).run();
+      if (!result.meta.changes) throw new PartyRequestError('탈퇴할 파티 참가 정보를 찾지 못했습니다.', 404);
+      await database.prepare(`
+        UPDATE parties
+        SET status = 'open'
+        WHERE id = ?
+          AND status = 'full'
+          AND departure_at > ?
+      `).bind(partyId, leftAt).run();
+      return Response.json({ party: (await loadParties(partyId))[0] });
+    }
+
+    if (action === 'delete') {
+      const partyId = textValue(body.partyId);
+      const currentParty = (await loadParties(partyId))[0];
+      if (!currentParty) throw new PartyRequestError('모집 글을 찾을 수 없습니다.', 404);
+      if (currentParty.status === 'cancelled') throw new PartyRequestError('이미 삭제된 모집 글입니다.', 409);
+      const nickname = textValue(body.nickname).trim();
+      const hexaStat = numeric(body.hexaStat);
+      const member = currentParty.members.find((item) => item.nickname === nickname);
+      if (!member || member.role !== 'leader' || currentParty.leaderNickname !== nickname) {
+        throw new PartyRequestError('파티장만 모집 글을 삭제할 수 있습니다.', 403);
+      }
+      await verifyCharacter(request, nickname, hexaStat, currentParty.bossId);
+
+      const database = partyDatabase();
+      const result = await database.prepare(`
+        UPDATE parties
+        SET status = 'cancelled'
+        WHERE id = ?
+          AND leader_nickname = ?
+          AND status != 'cancelled'
+      `).bind(partyId, nickname).run();
+      if (!result.meta.changes) throw new PartyRequestError('삭제할 모집 글을 찾지 못했습니다.', 404);
+      return Response.json({ parties: await loadParties() });
+    }
+
     throw new PartyRequestError('지원하지 않는 파티 요청입니다.');
   } catch (error) {
     if (error instanceof PartyRequestError) return Response.json({ error: error.message }, { status: error.status });
