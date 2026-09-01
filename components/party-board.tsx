@@ -17,19 +17,19 @@ import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@
 import { cn } from '@/lib/utils';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
-const USE_BOSS_SELECTION_PORTRAITS = true;
+const USE_BOSS_SELECTOR_ICONS = true;
 const CROP_FALLBACK_BOSS_SELECTION_ICONS = true;
 const BOSS_SELECTION_IMAGE_BY_NAME: Record<string, string> = {
-  '유피테르': '/boss-portraits/jupiter-face.png',
-  '카링': '/boss-portraits/kaling-face.png',
-  '감시자 칼로스': '/boss-portraits/kalos-face.png',
-  '벨로나': '/boss-portraits/bellona-face.png',
-  '림보': '/boss-portraits/limbo-face.png',
-  '흉성': '/boss-portraits/malefic-star-face.png',
-  '선택받은 세렌': '/boss-portraits/seren-face.png',
-  '검은 마법사': '/boss-portraits/black-mage-face.png',
-  '스우': '/boss-portraits/lotus-face.png',
-  '대적자': '/boss-portraits/first-adversary-face.png',
+  '유피테르': '/boss-selector-icons/jupiter.png',
+  '카링': '/boss-selector-icons/kaling.png',
+  '감시자 칼로스': '/boss-selector-icons/kalos.png',
+  '벨로나': '/boss-selector-icons/bellona.png',
+  '림보': '/boss-selector-icons/limbo.png',
+  '흉성': '/boss-selector-icons/malefic-star.png',
+  '선택받은 세렌': '/boss-selector-icons/seren.png',
+  '검은 마법사': '/boss-selector-icons/black-mage.png',
+  '스우': '/boss-selector-icons/lotus.png',
+  '대적자': '/boss-selector-icons/first-adversary.png',
 };
 const difficultyStyles: Record<string, { active: string; idle: string }> = {
   익스트림: { active: 'border-[#e55c37] bg-[#e55c37] text-white', idle: 'border-[#f1b4a4] bg-[#fff3ef] text-[#c84725]' },
@@ -48,14 +48,14 @@ const rewardOptions: { value: RewardPreset; title: string; description: string }
 ];
 
 function bossSelectionAsset(name: string, fallbackImage?: string) {
-  const portraitImage = BOSS_SELECTION_IMAGE_BY_NAME[name];
-  if (USE_BOSS_SELECTION_PORTRAITS && portraitImage) return { src: portraitImage, cropFallback: false };
+  const selectorImage = BOSS_SELECTION_IMAGE_BY_NAME[name];
+  if (USE_BOSS_SELECTOR_ICONS && selectorImage) return { src: selectorImage, cropFallback: false };
   return { src: fallbackImage, cropFallback: CROP_FALLBACK_BOSS_SELECTION_ICONS };
 }
 
 function BossSelectionImage({ src, alt, className, eager = false, cropFallback = false }: { src: string; alt: string; className?: string; eager?: boolean; cropFallback?: boolean }) {
   return (
-    <span className={cn('relative block shrink-0 overflow-hidden rounded-md border border-[#d7dbe2] bg-[#f6f7f9]', className)}>
+    <span className={cn('relative block shrink-0 overflow-hidden rounded-lg border border-[#232832] bg-[#111722] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-8px_12px_rgba(0,0,0,0.34),0_1px_2px_rgba(15,18,24,0.35)]', className)}>
       <Image
         src={src}
         alt={alt}
@@ -67,6 +67,7 @@ function BossSelectionImage({ src, alt, className, eager = false, cropFallback =
           cropFallback && 'origin-top scale-[1.56]',
         )}
       />
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset ring-white/30 shadow-[inset_0_0_0_2px_rgba(0,0,0,0.22),inset_0_-10px_12px_rgba(0,0,0,0.28)]" />
     </span>
   );
 }
