@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Copy, Crown, LayoutGrid, LinkIcon, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users, X } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Copy, Crown, LayoutGrid, LinkIcon, LogIn, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -675,17 +675,18 @@ export function PartyBoard({
   const selectedRoleHasSeat = selectedParty && isRoleContract(selectedParty)
     ? roleHasSeat(selectedParty, selectedJoinRole)
     : Boolean(selectedParty && selectedParty.status === 'open' && selectedParty.members.length < selectedParty.capacity);
-  const canJoin = Boolean(
+  const joinConditionsMet = Boolean(
     selectedParty
     && selectedParty.status === 'open'
     && selectedParty.members.length < selectedParty.capacity
     && selectedRoleHasSeat
     && !alreadyJoined
-    && Boolean(authUser)
     && profileMatchesNickname
     && (selectedMyRate ?? 0) >= selectedRoleMinimum
     && (!isRoleContract(selectedParty) || termsAccepted),
   );
+  const canJoin = Boolean(joinConditionsMet && authUser);
+  const canLoginThenJoin = Boolean(joinConditionsMet && !authUser);
 
   return (
     <>
@@ -1045,7 +1046,7 @@ export function PartyBoard({
               {!alreadyJoined && <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md bg-[#f7f8fa] px-3 py-2.5 text-xs leading-5 text-[#454c57]"><Checkbox checked={termsAccepted} onCheckedChange={setTermsAccepted} className="mt-0.5 data-checked:border-[#eb5b35] data-checked:bg-[#eb5b35]" /><span>위 {roleLabel(selectedJoinRole)} 조건과 보상 약정을 확인했으며 동의합니다.</span></label>}
             </section>}
             <div className={`rounded-md border px-3 py-2 text-xs ${canJoin ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-[#dfe2e8] bg-[#fafbfc] text-[#687080]'}`}>
-              {alreadyJoined ? '이미 이 파티에 참가 중입니다.' : !profileMatchesNickname ? '현재 닉네임을 먼저 조회해 주세요.' : selectedParty.status === 'full' ? '모집이 완료된 파티입니다.' : !selectedRoleHasSeat ? '선택한 역할의 모집이 완료되었습니다.' : (selectedMyRate ?? 0) < selectedRoleMinimum ? `내 배율이 선택한 역할의 최소 조건보다 ${rateLabel(Math.max(0, selectedRoleMinimum - (selectedMyRate ?? 0)))} 부족합니다.` : isRoleContract(selectedParty) && !termsAccepted ? '보상 약정을 확인하고 동의해 주세요.' : canJoin ? <span className="flex items-center gap-1.5"><UserRoundCheck className="size-4" />가입 조건을 충족합니다.</span> : '가입 조건을 다시 확인해 주세요.'}
+              {alreadyJoined ? '이미 이 파티에 참가 중입니다.' : !profileMatchesNickname ? '현재 닉네임을 먼저 조회해 주세요.' : selectedParty.status === 'full' ? '모집이 완료된 파티입니다.' : !selectedRoleHasSeat ? '선택한 역할의 모집이 완료되었습니다.' : (selectedMyRate ?? 0) < selectedRoleMinimum ? `내 배율이 선택한 역할의 최소 조건보다 ${rateLabel(Math.max(0, selectedRoleMinimum - (selectedMyRate ?? 0)))} 부족합니다.` : isRoleContract(selectedParty) && !termsAccepted ? '보상 약정을 확인하고 동의해 주세요.' : !authUser ? '로그인 후 가입할 수 있습니다.' : canJoin ? <span className="flex items-center gap-1.5"><UserRoundCheck className="size-4" />가입 조건을 충족합니다.</span> : '가입 조건을 다시 확인해 주세요.'}
             </div>
             <DialogFooter className="items-stretch sm:items-center sm:justify-between">
               <div className="flex flex-col-reverse gap-2 sm:flex-row">
@@ -1053,8 +1054,8 @@ export function PartyBoard({
                 {canLeaveParty && <Button type="button" variant="outline" disabled={submitting} onClick={() => void leaveParty()} className="rounded-md border-[#f0b8aa] text-[#c74928] hover:bg-[#fff1ec]"><LogOut className="size-4" />{submitting ? '탈퇴 중' : '파티 탈퇴'}</Button>}
               </div>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={() => setDetailOpen(false)} className="rounded-md">닫기</Button>
-                {!alreadyJoined && <Button type="button" disabled={!canJoin || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]"><Check className="size-4" />{submitting ? '검증 중' : isRoleContract(selectedParty) ? `${roleLabel(selectedJoinRole)}로 가입` : '가입하기'}</Button>}
+                <Button type="button" variant="outline" onClick={() => closeDetail(false)} className="rounded-md">닫기</Button>
+                {!alreadyJoined && <Button type="button" disabled={(!canJoin && !canLoginThenJoin) || submitting} onClick={() => void joinParty()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">{canLoginThenJoin ? <LogIn className="size-4" /> : <Check className="size-4" />}{submitting ? '검증 중' : canLoginThenJoin ? '로그인하고 가입' : isRoleContract(selectedParty) ? `${roleLabel(selectedJoinRole)}로 가입` : '가입하기'}</Button>}
               </div>
             </DialogFooter>
           </>}
