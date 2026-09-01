@@ -17,7 +17,20 @@ import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@
 import { cn } from '@/lib/utils';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
-const CROP_BOSS_SELECTION_ICONS = true;
+const USE_BOSS_SELECTION_PORTRAITS = true;
+const CROP_FALLBACK_BOSS_SELECTION_ICONS = true;
+const BOSS_SELECTION_IMAGE_BY_NAME: Record<string, string> = {
+  '유피테르': '/boss-portraits/jupiter-face.png',
+  '카링': '/boss-portraits/kaling-face.png',
+  '감시자 칼로스': '/boss-portraits/kalos-face.png',
+  '벨로나': '/boss-portraits/bellona-face.png',
+  '림보': '/boss-portraits/limbo-face.png',
+  '흉성': '/boss-portraits/malefic-star-face.png',
+  '선택받은 세렌': '/boss-portraits/seren-face.png',
+  '검은 마법사': '/boss-portraits/black-mage-face.png',
+  '스우': '/boss-portraits/lotus-face.png',
+  '대적자': '/boss-portraits/first-adversary-face.png',
+};
 const difficultyStyles: Record<string, { active: string; idle: string }> = {
   익스트림: { active: 'border-[#e55c37] bg-[#e55c37] text-white', idle: 'border-[#f1b4a4] bg-[#fff3ef] text-[#c84725]' },
   데스티니: { active: 'border-[#7155c5] bg-[#7155c5] text-white', idle: 'border-[#c8bcec] bg-[#f5f2ff] text-[#5a3cad]' },
@@ -34,7 +47,13 @@ const rewardOptions: { value: RewardPreset; title: string; description: string }
   { value: 'main_loot_adjusted_crystal', title: '보조격수 정산', description: '물욕템 메인만 · 보조 결정석 일부 정산' },
 ];
 
-function BossSelectionImage({ src, alt, className, eager = false }: { src: string; alt: string; className?: string; eager?: boolean }) {
+function bossSelectionAsset(name: string, fallbackImage?: string) {
+  const portraitImage = BOSS_SELECTION_IMAGE_BY_NAME[name];
+  if (USE_BOSS_SELECTION_PORTRAITS && portraitImage) return { src: portraitImage, cropFallback: false };
+  return { src: fallbackImage, cropFallback: CROP_FALLBACK_BOSS_SELECTION_ICONS };
+}
+
+function BossSelectionImage({ src, alt, className, eager = false, cropFallback = false }: { src: string; alt: string; className?: string; eager?: boolean; cropFallback?: boolean }) {
   return (
     <span className={cn('relative block shrink-0 overflow-hidden rounded-md border border-[#d7dbe2] bg-[#f6f7f9]', className)}>
       <Image
@@ -44,8 +63,8 @@ function BossSelectionImage({ src, alt, className, eager = false }: { src: strin
         sizes="72px"
         loading={eager ? 'eager' : 'lazy'}
         className={cn(
-          'object-cover object-top',
-          CROP_BOSS_SELECTION_ICONS && 'origin-top scale-[1.56]',
+          'object-cover',
+          cropFallback && 'origin-top scale-[1.56]',
         )}
       />
     </span>
@@ -197,6 +216,7 @@ export function PartyBoard({
   const difficultyOptions = partyBosses.filter((boss) => boss.name === bossName);
   const [bossId, setBossId] = useState(difficultyOptions[0]?.id ?? '');
   const selectedBoss = partyBosses.find((boss) => boss.id === bossId) ?? difficultyOptions[0];
+  const selectedBossSelectionAsset = bossSelectionAsset(selectedBoss?.name ?? bossName, selectedBoss?.image);
   const [capacity, setCapacity] = useState('6');
   const [requiredPartyRate, setRequiredPartyRate] = useState('130');
   const [mainCapacity, setMainCapacity] = useState('2');
@@ -216,7 +236,8 @@ export function PartyBoard({
   const createBossOptions = useMemo(() => bossNames.map((name) => {
     const options = partyBosses.filter((boss) => boss.name === name);
     const image = options.find((boss) => boss.image)?.image;
-    return { name, image };
+    const asset = bossSelectionAsset(name, image);
+    return { name, image: asset.src, cropFallback: asset.cropFallback };
   }), [bossNames, partyBosses]);
 
   async function refreshParties() {
@@ -288,16 +309,18 @@ export function PartyBoard({
 
   const myRates = useMemo(() => new Map(partyBosses.map((boss) => [boss.id, boss.rate])), [partyBosses]);
   const bossFilterOptions = useMemo(() => {
-    const options = new Map<string, { name: string; image?: string; count: number }>();
+    const options = new Map<string, { name: string; image?: string; cropFallback: boolean; count: number }>();
 
     for (const party of parties) {
       const current = options.get(party.bossName);
       const matchedBoss = partyBosses.find((boss) => boss.id === party.bossId);
       const image = matchedBoss?.image ?? partyBosses.find((boss) => boss.name === party.bossName && boss.image)?.image;
+      const asset = bossSelectionAsset(party.bossName, image);
 
       options.set(party.bossName, {
         name: party.bossName,
-        image: current?.image ?? image,
+        image: current?.image ?? asset.src,
+        cropFallback: current?.cropFallback ?? asset.cropFallback,
         count: (current?.count ?? 0) + 1,
       });
     }
@@ -523,7 +546,7 @@ export function PartyBoard({
                     className={`relative flex w-[74px] flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/40 ${selected ? 'border-[#eb5b35] bg-[#fff5f1] text-[#c74928]' : 'border-[#dfe2e8] bg-white text-[#626a77] hover:border-[#bec4ce]'}`}
                   >
                     {boss.image
-                      ? <BossSelectionImage src={boss.image} alt={boss.name} className="size-[52px]" />
+                      ? <BossSelectionImage src={boss.image} alt={boss.name} cropFallback={boss.cropFallback} className="size-[52px]" />
                       : <span className="grid size-[52px] place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{boss.name}</span>}
                     <span className="w-full truncate">{boss.name}</span>
                     <span className={`absolute right-1 top-1 min-w-5 rounded-full border-2 border-white px-1 text-center text-[10px] leading-4 text-white ${selected ? 'bg-[#eb5b35]' : 'bg-[#20242c]'}`}>{boss.count}</span>
@@ -616,8 +639,8 @@ export function PartyBoard({
                     aria-labelledby="party-boss-label"
                     className="flex h-[72px] w-full items-center gap-3 rounded-md border border-[#ccd1d9] bg-white px-3 text-left outline-none transition-colors hover:border-[#9fa6b1] focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30"
                   >
-                    {selectedBoss?.image
-                      ? <BossSelectionImage src={selectedBoss.image} alt="" eager className="size-[54px]" />
+                    {selectedBossSelectionAsset.src
+                      ? <BossSelectionImage src={selectedBossSelectionAsset.src} alt="" eager cropFallback={selectedBossSelectionAsset.cropFallback} className="size-[54px]" />
                       : <span className="grid size-[54px] shrink-0 place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{bossName}</span>}
                     <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-[#8a919d]">선택한 보스</span><strong className="mt-0.5 block truncate text-sm text-[#252a32]">{bossName}</strong></span>
                     <ChevronDown className={`size-4 shrink-0 text-[#747b88] transition-transform ${bossPickerOpen ? 'rotate-180' : ''}`} />
@@ -637,7 +660,7 @@ export function PartyBoard({
                               className={`relative flex min-h-[92px] flex-col items-center justify-center gap-1.5 rounded-md border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff4ef]' : 'border-[#dfe2e8] bg-white hover:border-[#b6bcc6] hover:bg-[#fafbfc]'}`}
                             >
                               {boss.image
-                                ? <BossSelectionImage src={boss.image} alt="" eager className="size-[58px]" />
+                                ? <BossSelectionImage src={boss.image} alt="" eager cropFallback={boss.cropFallback} className="size-[58px]" />
                                 : <span className="grid size-[58px] place-items-center rounded-md bg-[#252a32] px-1 text-[10px] font-bold text-white">{boss.name}</span>}
                               <span className={`w-full truncate text-xs font-bold ${selected ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{boss.name}</span>
                               {selected && <span className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-[#eb5b35] text-white"><Check className="size-3" /></span>}
