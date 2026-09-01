@@ -2,9 +2,11 @@ import { REFERENCE_PROFILE, type AuthenticRegion, type CharacterCalculationProfi
 import { optimizePresets } from '@/lib/presets';
 
 const API_BASE = 'https://open.api.nexon.com/maplestory/v1';
+const PROFILE_CACHE_TTL_MS = 2 * 60_000;
 type FinalStat = { stat_name: string; stat_value: string };
 type NexonError = { error?: { name?: string; message?: string }; name?: string; message?: string };
 type JsonRecord = Record<string, unknown>;
+const profileCache = new Map<string, { expiresAt: number; payload: unknown }>();
 
 function numeric(value: unknown) {
   if (typeof value !== 'string' && typeof value !== 'number') return 0;
@@ -115,7 +117,9 @@ async function optionalJson(path: string, ocid: string, headers: Record<string, 
 }
 
 export async function GET(request: Request) {
-  const nickname = new URL(request.url).searchParams.get('nickname')?.trim();
+  const requestUrl = new URL(request.url);
+  const nickname = requestUrl.searchParams.get('nickname')?.trim();
+  const forceRefresh = requestUrl.searchParams.get('refresh') === '1';
   if (!nickname) return Response.json({ error: '닉네임을 입력해 주세요.' }, { status: 400 });
   const requestApiKey = request.headers.get('x-nexon-api-key')?.trim();
   const apiKey = process.env.NEXON_API_KEY || requestApiKey;
@@ -124,22 +128,17 @@ export async function GET(request: Request) {
     return Response.json({ error: '다른 캐릭터를 조회하려면 NEXON Open API 키를 연결해 주세요.', code: 'API_KEY_REQUIRED' }, { status: 401 });
   }
 
+  const cached = profileCache.get(nickname);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return Response.json(cached.payload, { headers: { 'X-MapleParty-Profile-Cache': 'hit' } });
+  }
+
   const headers = { 'x-nxopen-api-key': apiKey };
   const idResponse = await nexonFetch(`${API_BASE}/id?character_name=${encodeURIComponent(nickname)}`, headers);
   if (!idResponse.ok) return upstreamError(idResponse, '캐릭터 식별자');
   const { ocid } = await idResponse.json() as { ocid?: string };
   if (!ocid) return Response.json({ error: '캐릭터 식별값을 받지 못했습니다.' }, { status: 502 });
 
-  const [basicResponse, statResponse] = await Promise.all([
-    nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers),
-    nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers),
-  ]);
-  if (!basicResponse.ok) return upstreamError(basicResponse, '기본 정보');
-  if (!statResponse.ok) return upstreamError(statResponse, '종합 능력치');
-  const [basic, stat] = await Promise.all([
-    basicResponse.json(),
-    statResponse.json(),
-  ]);
   const optionalPaths = [
     'character/symbol-equipment',
     'character/item-equipment',
@@ -150,11 +149,19 @@ export async function GET(request: Request) {
     'character/hexamatrix',
     'character/hexamatrix-stat',
   ];
-  const optionalResults: unknown[] = [];
-  for (const path of optionalPaths) {
-    optionalResults.push(await optionalJson(path, ocid, headers));
-    await new Promise((resolve) => setTimeout(resolve, 180));
-  }
+  const [[basicResponse, statResponse], optionalResults] = await Promise.all([
+    Promise.all([
+      nexonFetch(`${API_BASE}/character/basic?ocid=${encodeURIComponent(ocid)}`, headers),
+      nexonFetch(`${API_BASE}/character/stat?ocid=${encodeURIComponent(ocid)}`, headers),
+    ]),
+    Promise.all(optionalPaths.map((path) => optionalJson(path, ocid, headers))),
+  ]);
+  if (!basicResponse.ok) return upstreamError(basicResponse, '기본 정보');
+  if (!statResponse.ok) return upstreamError(statResponse, '종합 능력치');
+  const [basic, stat] = await Promise.all([
+    basicResponse.json(),
+    statResponse.json(),
+  ]);
   const [symbols, items, ability, hyper, links, union, hexaMatrix, hexaStatMatrix] = optionalResults;
   const presetSourcesComplete = [items, ability, hyper, links, union].every((source) => source !== undefined);
   const partialData = optionalResults.some((source) => source === undefined);
@@ -192,7 +199,7 @@ export async function GET(request: Request) {
     hexa: hexaCoreProfile(hexaCores, hexaStatMatrix),
   };
 
-  return Response.json({
+  const payload = {
     nickname,
     characterClass,
     level: numeric((basic as { character_level?: number }).character_level),
@@ -208,5 +215,13 @@ export async function GET(request: Request) {
     calculationProfile,
     partialData,
     source: 'nexon',
-  });
+  };
+  profileCache.set(nickname, { expiresAt: Date.now() + PROFILE_CACHE_TTL_MS, payload });
+  if (profileCache.size > 100) {
+    const now = Date.now();
+    for (const [key, value] of profileCache) {
+      if (value.expiresAt <= now) profileCache.delete(key);
+    }
+  }
+  return Response.json(payload, { headers: { 'X-MapleParty-Profile-Cache': 'miss' } });
 }

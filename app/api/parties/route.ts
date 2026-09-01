@@ -93,13 +93,21 @@ async function loadParties(partyId?: string) {
   const { results: partyRows } = await partyQuery.all<PartyRow>();
   if (!partyRows.length) return [];
 
-  const { results: memberRows } = await database.prepare(`
-    SELECT m.*
-    FROM party_members m
-    JOIN parties p ON p.id = m.party_id
-    WHERE p.departure_at > ? AND p.status != 'cancelled'
-    ORDER BY m.joined_at ASC
-  `).bind(now).all<MemberRow>();
+  const memberQuery = partyId
+    ? database.prepare(`
+        SELECT m.*
+        FROM party_members m
+        WHERE m.party_id = ?
+        ORDER BY m.joined_at ASC
+      `).bind(partyId)
+    : database.prepare(`
+        SELECT m.*
+        FROM party_members m
+        JOIN parties p ON p.id = m.party_id
+        WHERE p.departure_at > ? AND p.status != 'cancelled'
+        ORDER BY m.joined_at ASC
+      `).bind(now);
+  const { results: memberRows } = await memberQuery.all<MemberRow>();
   const membersByParty = new Map<string, PartyMember[]>();
   for (const row of memberRows) {
     const members = membersByParty.get(row.party_id) ?? [];
@@ -182,7 +190,7 @@ export async function POST(request: Request) {
             WHERE departure_at > ? AND status != 'cancelled'
           )
       `).bind(characterImage, nickname, new Date().toISOString()).run();
-      return Response.json({ parties: await loadParties() });
+      return Response.json({ synced: true });
     }
 
     if (action === 'create') {

@@ -151,11 +151,15 @@ export function PartyBoard({
       signal: controller.signal,
     })
       .then(async (response) => {
-        const data = await response.json() as PartyActionResponse;
+        const data = await response.json() as { error?: string };
         if (!response.ok) throw new Error(data.error ?? '캐릭터 이미지를 동기화하지 못했습니다.');
-        return data.parties ?? [];
       })
-      .then((items) => setParties(items))
+      .then(() => setParties((current) => current.map((party) => ({
+        ...party,
+        members: party.members.map((member) => member.nickname === profile.nickname
+          ? { ...member, characterImage: profile.image }
+          : member),
+      }))))
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : '캐릭터 이미지를 동기화하지 못했습니다.');
       });
@@ -459,7 +463,7 @@ export function PartyBoard({
                     className="flex h-[72px] w-full items-center gap-3 rounded-md border border-[#ccd1d9] bg-white px-3 text-left outline-none transition-colors hover:border-[#9fa6b1] focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30"
                   >
                     {selectedBoss?.image
-                      ? <Image src={selectedBoss.image} alt="" width={54} height={54} className="size-[54px] shrink-0 rounded-md border border-[#d7dbe2] object-cover" />
+                      ? <Image src={selectedBoss.image} alt="" width={54} height={54} loading="eager" className="size-[54px] shrink-0 rounded-md border border-[#d7dbe2] object-cover" />
                       : <span className="grid size-[54px] shrink-0 place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{bossName}</span>}
                     <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-[#8a919d]">선택한 보스</span><strong className="mt-0.5 block truncate text-sm text-[#252a32]">{bossName}</strong></span>
                     <ChevronDown className={`size-4 shrink-0 text-[#747b88] transition-transform ${bossPickerOpen ? 'rotate-180' : ''}`} />
@@ -479,7 +483,7 @@ export function PartyBoard({
                               className={`relative flex min-h-[92px] flex-col items-center justify-center gap-1.5 rounded-md border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff4ef]' : 'border-[#dfe2e8] bg-white hover:border-[#b6bcc6] hover:bg-[#fafbfc]'}`}
                             >
                               {boss.image
-                                ? <Image src={boss.image} alt="" width={58} height={58} className="size-[58px] rounded-md border border-[#d7dbe2] object-cover" />
+                                ? <Image src={boss.image} alt="" width={58} height={58} loading="eager" className="size-[58px] rounded-md border border-[#d7dbe2] object-cover" />
                                 : <span className="grid size-[58px] place-items-center rounded-md bg-[#252a32] px-1 text-[10px] font-bold text-white">{boss.name}</span>}
                               <span className={`w-full truncate text-xs font-bold ${selected ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{boss.name}</span>
                               {selected && <span className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-[#eb5b35] text-white"><Check className="size-3" /></span>}
@@ -542,7 +546,7 @@ export function PartyBoard({
                   const characterImage = member.nickname === profile.nickname ? profile.image ?? member.characterImage : member.characterImage;
                   return <article key={member.id} className="rounded-lg border border-[#dfe2e8] bg-white px-3 pb-3.5 pt-4 text-center">
                     <div className="relative mx-auto size-40 overflow-hidden rounded-full border border-[#d8dce2] bg-[#f3f5f7]">
-                      {characterImage ? <Image unoptimized src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="absolute left-1/2 top-1/2 size-[300px] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain" /> : <div className="grid size-full place-items-center text-[#8a919d]"><CircleUserRound className="size-10" /></div>}
+                      {characterImage ? <Image unoptimized loading="eager" src={characterImage} alt={`${member.nickname} 캐릭터`} width={300} height={300} className="absolute left-1/2 top-1/2 size-[300px] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain" /> : <div className="grid size-full place-items-center text-[#8a919d]"><CircleUserRound className="size-10" /></div>}
                     </div>
                     <div className="pt-3">
                       <div className="flex items-center justify-center gap-2">

@@ -114,7 +114,7 @@ export default function Home() {
     requestController.current = controller;
     setLoading(true);
     try {
-      const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}`, {
+      const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}&refresh=1`, {
         headers: key ? { 'x-nexon-api-key': key } : {},
         signal: controller.signal,
       });
