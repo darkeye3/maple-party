@@ -1,8 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { SyntheticEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Crown, LayoutGrid, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users } from 'lucide-react';
+import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Copy, Crown, LayoutGrid, LinkIcon, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -12,11 +12,14 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
+import type { AuthUser } from '@/lib/auth';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
 import { cn } from '@/lib/utils';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
+const RATE_PRESETS_STORAGE_KEY = 'maple-party-rate-presets';
+const DEFAULT_RATE_PRESETS = ['110', '130', '150'];
 const USE_BOSS_SELECTOR_ICONS = true;
 const CROP_FALLBACK_BOSS_SELECTION_ICONS = true;
 const BOSS_SELECTION_IMAGE_BY_NAME: Record<string, string> = {
@@ -91,10 +94,12 @@ type PartyBoardProps = {
   characterLoading: boolean;
   bossResults: BossResult[];
   apiKey: string;
+  authUser: AuthUser | null;
   onNicknameChange: (value: string) => void;
   onHexaChange: (value: string) => void;
   onLookup: () => Promise<void>;
   onOpenCalculator: () => void;
+  onRequireAuth: (message: string) => void;
 };
 
 function localDateTimeFromDate(date: Date) {
@@ -187,7 +192,7 @@ function memberRewardSummary(party: PartyPost, role: CombatRole) {
 }
 
 async function fetchPartyList(signal?: AbortSignal) {
-  const response = await fetch('/api/parties', { cache: 'no-store', signal });
+  const response = await fetch('/api/parties', { cache: 'no-store', credentials: 'same-origin', signal });
   const data = await response.json() as { parties?: PartyPost[]; error?: string };
   if (!response.ok) throw new Error(data.error ?? '파티 목록을 불러오지 못했습니다.');
   return data.parties ?? [];
@@ -202,10 +207,12 @@ export function PartyBoard({
   characterLoading,
   bossResults,
   apiKey,
+  authUser,
   onNicknameChange,
   onHexaChange,
   onLookup,
   onOpenCalculator,
+  onRequireAuth,
 }: PartyBoardProps) {
   const partyBosses = useMemo(() => bossResults.filter((boss) => boss.partyLimit > 1), [bossResults]);
   const bossNames = useMemo(() => [...new Set(partyBosses.map((boss) => boss.name))], [partyBosses]);
@@ -223,6 +230,7 @@ export function PartyBoard({
   const [bossPickerOpen, setBossPickerOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<PartyPost | null>(null);
+  const directPartyCodeRef = useRef<string | null>(null);
   const [bossName, setBossName] = useState(bossNames[0] ?? '');
   const difficultyOptions = useMemo(() => (
     partyBosses
@@ -234,6 +242,8 @@ export function PartyBoard({
   const selectedBossSelectionAsset = bossSelectionAsset(selectedBoss?.name ?? bossName, selectedBoss?.image);
   const [capacity, setCapacity] = useState('6');
   const [requiredPartyRate, setRequiredPartyRate] = useState('130');
+  const [ratePresets, setRatePresets] = useState(DEFAULT_RATE_PRESETS);
+  const [ratePresetDraft, setRatePresetDraft] = useState('');
   const [secondaryEnabled, setSecondaryEnabled] = useState(false);
   const [mainCapacity, setMainCapacity] = useState('2');
   const [mainMinimumRate, setMainMinimumRate] = useState('40');
@@ -262,6 +272,11 @@ export function PartyBoard({
     const asset = bossSelectionAsset(name, image);
     return { name, image: asset.src, cropFallback: asset.cropFallback };
   }), [bossNames, partyBosses]);
+  const sortedRatePresets = useMemo(() => (
+    [...new Set(ratePresets)]
+      .filter((rate) => Number(rate) >= 1 && Number(rate) <= 1000)
+      .sort((left, right) => Number(left) - Number(right))
+  ), [ratePresets]);
 
   async function refreshParties() {
     setListLoading(true);
@@ -274,6 +289,26 @@ export function PartyBoard({
       setListLoading(false);
     }
   }
+
+  useEffect(() => {
+    const storedPresets = localStorage.getItem(RATE_PRESETS_STORAGE_KEY);
+    if (!storedPresets) return;
+    try {
+      const parsed = JSON.parse(storedPresets) as unknown;
+      if (Array.isArray(parsed)) {
+        const next = parsed
+          .map((item) => String(Number(item)))
+          .filter((item) => Number(item) >= 1 && Number(item) <= 1000);
+        if (next.length) setRatePresets([...new Set(next)]);
+      }
+    } catch {
+      localStorage.removeItem(RATE_PRESETS_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(RATE_PRESETS_STORAGE_KEY, JSON.stringify(sortedRatePresets));
+  }, [sortedRatePresets]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -368,7 +403,8 @@ export function PartyBoard({
         ? roleHasSeat(party, 'main_dealer') || roleHasSeat(party, 'secondary_dealer')
         : party.status === 'open' && party.members.length < party.capacity;
       const departureTime = new Date(party.departureAt).getTime();
-      const canJoinParty = profileMatchesNickname
+      const canJoinParty = Boolean(authUser)
+        && profileMatchesNickname
         && hasSeat
         && !party.members.some((member) => member.nickname === nicknameValue)
         && availableRoleForRate(party, myRates.get(party.bossId));
@@ -380,7 +416,7 @@ export function PartyBoard({
       if (departingSoonOnly && (!Number.isFinite(departureTime) || departureTime < departingSoonReference || departureTime > departingSoonLimit)) return false;
       return true;
     });
-  }, [activeDifficultyFilter, bossFilter, departingSoonOnly, departingSoonReference, eligibleOnly, myRates, nickname, openOnly, parties, profileMatchesNickname]);
+  }, [activeDifficultyFilter, authUser, bossFilter, departingSoonOnly, departingSoonReference, eligibleOnly, myRates, nickname, openOnly, parties, profileMatchesNickname]);
 
   function selectBossFilter(value: string) {
     setBossFilter(value);
@@ -390,6 +426,7 @@ export function PartyBoard({
   async function postPartyAction(payload: Record<string, unknown>) {
     const response = await fetch('/api/parties', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         ...(apiKey ? { 'x-nexon-api-key': apiKey } : {}),
@@ -409,6 +446,7 @@ export function PartyBoard({
 
   async function createParty(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!authUser) return onRequireAuth('파티 모집은 로그인 후 만들 수 있습니다.');
     if (!selectedBoss) return setNotice('보스와 난이도를 선택해 주세요.');
     setSubmitting(true);
     setNotice('');
@@ -443,6 +481,7 @@ export function PartyBoard({
 
   async function joinParty() {
     if (!selectedParty) return;
+    if (!authUser) return onRequireAuth('파티 가입은 로그인 후 이용할 수 있습니다.');
     setSubmitting(true);
     setNotice('');
     try {
@@ -468,6 +507,7 @@ export function PartyBoard({
 
   async function leaveParty() {
     if (!selectedParty) return;
+    if (!authUser) return onRequireAuth('파티 탈퇴는 로그인 후 이용할 수 있습니다.');
     if (!window.confirm(`${selectedParty.difficulty} ${selectedParty.bossName} 파티에서 탈퇴할까요?`)) return;
     setSubmitting(true);
     setNotice('');
@@ -492,6 +532,7 @@ export function PartyBoard({
 
   async function deleteParty() {
     if (!selectedParty) return;
+    if (!authUser) return onRequireAuth('모집 삭제는 로그인 후 이용할 수 있습니다.');
     if (!window.confirm(`${selectedParty.difficulty} ${selectedParty.bossName} 모집 글을 삭제할까요?`)) return;
     setSubmitting(true);
     setNotice('');
@@ -514,6 +555,10 @@ export function PartyBoard({
   }
 
   function openCreate() {
+    if (!authUser) {
+      onRequireAuth('파티 모집은 로그인 후 만들 수 있습니다.');
+      return;
+    }
     if (!profileMatchesNickname) {
       setNotice('파티를 만들기 전에 현재 닉네임의 배율을 갱신해 주세요.');
       return;
@@ -533,7 +578,34 @@ export function PartyBoard({
     setCreateOpen(true);
   }
 
-  function openDetail(party: PartyPost) {
+  function setPartyAddress(party?: PartyPost) {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (party?.shareCode) url.searchParams.set('party', party.shareCode);
+    else url.searchParams.delete('party');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function partyShareUrl(party: PartyPost) {
+    if (typeof window === 'undefined') return '';
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('party', party.shareCode);
+    return url.toString();
+  }
+
+  async function copyPartyLink(party: PartyPost) {
+    const url = partyShareUrl(party);
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice(`${party.difficulty} ${party.bossName} 초대 링크를 복사했습니다.`);
+    } catch {
+      window.prompt('초대 링크를 복사해 주세요.', url);
+    }
+  }
+
+  function openDetail(party: PartyPost, updateAddress = true) {
     setSelectedParty(party);
     const myRate = myRates.get(party.bossId);
     const preferredRole = isRoleContract(party)
@@ -544,14 +616,59 @@ export function PartyBoard({
     setSelectedJoinRole(preferredRole);
     setTermsAccepted(false);
     setNotice('');
+    if (updateAddress) setPartyAddress(party);
     setDetailOpen(true);
   }
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const code = new URL(window.location.href).searchParams.get('party')?.trim();
+    if (!code || listLoading || directPartyCodeRef.current === code) return;
+    const linkedParty = parties.find((party) => party.shareCode === code || party.id === code);
+    if (linkedParty) {
+      directPartyCodeRef.current = code;
+      openDetail(linkedParty, false);
+      return;
+    }
+    directPartyCodeRef.current = code;
+    setNotice('공유 링크의 파티를 찾지 못했습니다. 모집이 종료되었을 수 있습니다.');
+    setPartyAddress();
+  }, [listLoading, parties]);
+
+  function closeDetail(open: boolean) {
+    setDetailOpen(open);
+    if (!open) {
+      setSelectedParty(null);
+      directPartyCodeRef.current = null;
+      setPartyAddress();
+    }
+  }
+
+  function addRatePreset() {
+    const normalized = String(Math.round(Number(ratePresetDraft)));
+    const value = Number(normalized);
+    if (!Number.isFinite(value) || value < 1 || value > 1000) {
+      setNotice('배율 프리셋은 1%부터 1,000% 사이로 추가해 주세요.');
+      return;
+    }
+    setRatePresets((current) => [...new Set([...current, normalized])]);
+    setRequiredPartyRate(normalized);
+    setRatePresetDraft('');
+  }
+
+  function removeRatePreset(rate: string) {
+    const next = sortedRatePresets.filter((item) => item !== rate);
+    const fallback = next[0] ?? DEFAULT_RATE_PRESETS[0];
+    setRatePresets(next.length ? next : DEFAULT_RATE_PRESETS);
+    if (requiredPartyRate === rate) setRequiredPartyRate(fallback);
+  }
+
   const selectedMyRate = selectedParty ? myRates.get(selectedParty.bossId) : undefined;
-  const selectedMember = selectedParty?.members.find((member) => member.nickname === nickname.trim());
+  const selectedMember = selectedParty?.members.find((member) => member.isCurrentUser)
+    ?? selectedParty?.members.find((member) => member.nickname === nickname.trim());
   const alreadyJoined = Boolean(selectedMember);
-  const canDeleteParty = Boolean(selectedParty && profileMatchesNickname && selectedMember?.role === 'leader');
-  const canLeaveParty = Boolean(selectedParty && profileMatchesNickname && selectedMember?.role === 'member');
+  const canDeleteParty = Boolean(authUser && selectedParty && selectedMember?.role === 'leader' && selectedMember.isCurrentUser);
+  const canLeaveParty = Boolean(authUser && selectedParty && selectedMember?.role === 'member' && selectedMember.isCurrentUser);
   const selectedRoleMinimum = selectedParty && isRoleContract(selectedParty)
     ? roleMinimumRate(selectedParty, selectedJoinRole)
     : selectedParty?.minimumRate ?? 0;
@@ -564,6 +681,7 @@ export function PartyBoard({
     && selectedParty.members.length < selectedParty.capacity
     && selectedRoleHasSeat
     && !alreadyJoined
+    && Boolean(authUser)
     && profileMatchesNickname
     && (selectedMyRate ?? 0) >= selectedRoleMinimum
     && (!isRoleContract(selectedParty) || termsAccepted),
@@ -590,7 +708,10 @@ export function PartyBoard({
           </div>
           <div className={`mt-3 flex min-h-8 flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs ${profileMatchesNickname ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
             <p className="flex items-center gap-1.5"><ShieldCheck className="size-4" />{profileMatchesNickname ? `${profile.nickname} · ${profile.characterClass} Lv.${profile.level} · 헥환 ${hexaStat.toLocaleString()}` : `현재 배율은 ${profile.nickname} 기준입니다. 새 닉네임을 조회해 주세요.`}</p>
-            <Button type="button" variant="ghost" size="sm" onClick={onOpenCalculator} className="h-6 px-2 text-xs">전체 배율 보기</Button>
+            <div className="flex items-center gap-2">
+              <span className="hidden rounded-sm bg-white/70 px-2 py-1 font-semibold sm:inline">{authUser ? `${authUser.displayName} 로그인` : '로그인 필요'}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={onOpenCalculator} className="h-6 px-2 text-xs">전체 배율 보기</Button>
+            </div>
           </div>
           {notice && <p className="mt-2 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs font-medium text-[#535b68]" aria-live="polite">{notice}</p>}
         </div>
@@ -698,7 +819,10 @@ export function PartyBoard({
                   </div>}
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <p className="min-w-0 truncate text-xs text-[#737b87]">파티장 <strong className="text-[#454c57]">{party.leaderNickname}</strong></p>
-                    <Button type="button" variant="outline" size="sm" onClick={() => openDetail(party)} className="h-8 rounded-md border-[#ccd1d9] text-xs"><Users className="size-3.5" />상세 보기</Button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => void copyPartyLink(party)} className="h-8 rounded-md px-2 text-xs text-[#687080]"><Copy className="size-3.5" />링크</Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => openDetail(party)} className="h-8 rounded-md border-[#ccd1d9] text-xs"><Users className="size-3.5" />상세 보기</Button>
+                    </div>
                   </div>
                 </article>
               );
@@ -780,7 +904,23 @@ export function PartyBoard({
             </div>
 
             <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
-              <div className="flex items-center justify-between gap-3"><div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Target className="size-3.5 text-[#eb5b35]" />20분 목표</h3><p className="mt-0.5 text-[11px] text-[#858c97]">파티 합산 배율이 도달할 목표입니다.</p></div><div className="flex gap-1">{['110', '130', '150'].map((rate) => <Button key={rate} type="button" variant="outline" size="sm" onClick={() => setRequiredPartyRate(rate)} className={`h-7 rounded-sm px-2 text-[11px] ${requiredPartyRate === rate ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : ''}`}>{rate}%</Button>)}</div></div>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Target className="size-3.5 text-[#eb5b35]" />20분 목표</h3><p className="mt-0.5 text-[11px] text-[#858c97]">자주 쓰는 목표 배율을 직접 저장해서 선택할 수 있습니다.</p></div>
+                <div className="flex max-w-full flex-col items-end gap-1.5">
+                  <div className="flex max-w-full flex-wrap justify-end gap-1">
+                    {sortedRatePresets.map((rate) => (
+                      <span key={rate} className={`inline-flex h-7 overflow-hidden rounded-sm border text-[11px] font-bold ${requiredPartyRate === rate ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#59616e]'}`}>
+                        <button type="button" onClick={() => setRequiredPartyRate(rate)} className="px-2 outline-none focus-visible:bg-white/70">{rate}%</button>
+                        <button type="button" aria-label={`${rate}% 프리셋 삭제`} onClick={() => removeRatePreset(rate)} className="grid w-6 place-items-center border-l border-inherit text-current/70 hover:bg-black/5"><X className="size-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex w-[188px] max-w-full gap-1">
+                    <Input inputMode="numeric" value={ratePresetDraft} onChange={(event) => setRatePresetDraft(event.target.value.replace(/[^0-9]/g, ''))} className="h-8 rounded-md border-[#ccd1d9] text-xs" placeholder="프리셋 추가" />
+                    <Button type="button" variant="outline" size="sm" onClick={addRatePreset} className="h-8 rounded-md px-2 text-xs"><Plus className="size-3.5" /></Button>
+                  </div>
+                </div>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label htmlFor="party-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">총 인원<NativeSelect id="party-capacity" value={String(selectedCapacity)} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(0, (selectedBoss?.partyLimit ?? 2) - 1) }, (_, index) => index + 2).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>
                 <label htmlFor="party-target-rate" className="space-y-1.5 text-xs font-semibold text-[#535b68]">목표 파티 배율<Input id="party-target-rate" type="number" min="1" max="1000" step="1" value={requiredPartyRate} onChange={(event) => setRequiredPartyRate(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
@@ -845,10 +985,15 @@ export function PartyBoard({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={closeDetail}>
         <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg sm:max-w-[780px]">
           {selectedParty && <>
             <DialogHeader><DialogTitle>{selectedParty.difficulty} {selectedParty.bossName}</DialogTitle><DialogDescription>{departureLabel(selectedParty.departureAt)} 출발 · {isRoleContract(selectedParty) ? `목표 ${rateLabel(selectedParty.requiredPartyRate ?? 0)}` : `최소 ${rateLabel(selectedParty.minimumRate)}`}</DialogDescription></DialogHeader>
+            <div className="flex min-w-0 items-center gap-2 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2">
+              <LinkIcon className="size-4 shrink-0 text-[#7a818d]" />
+              <p className="min-w-0 flex-1 truncate text-xs font-medium text-[#59616e]">{partyShareUrl(selectedParty)}</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => void copyPartyLink(selectedParty)} className="h-8 shrink-0 rounded-md border-[#ccd1d9] text-xs"><Copy className="size-3.5" />복사</Button>
+            </div>
             <div className="grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
               <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold">{selectedParty.members.length}/{selectedParty.capacity}</p></div>
               <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold text-[#1f5ed5]">{rateLabel(selectedParty.totalRate)}</p></div>

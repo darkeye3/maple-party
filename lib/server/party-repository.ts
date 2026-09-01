@@ -2,12 +2,14 @@ import type { CombatRole, PartyMember, PartyPost, RewardPreset } from '@/lib/par
 
 type PartyRow = {
   id: string;
+  share_code: string | null;
   boss_id: string;
   boss_name: string;
   difficulty: string;
   capacity: number;
   minimum_rate: number;
   departure_at: string;
+  leader_user_id: string | null;
   leader_nickname: string;
   leader_hexa: number;
   leader_rate: number;
@@ -30,6 +32,7 @@ type PartyRow = {
 type MemberRow = {
   id: string;
   party_id: string;
+  user_id: string | null;
   nickname: string;
   character_class: string;
   character_level: number;
@@ -58,6 +61,7 @@ export type CreatePartyRecord = {
   leaderHexa: number;
   leaderNickname: string;
   leaderRate: number;
+  leaderUserId: string;
   mainCapacity?: number;
   mainMinimumRate?: number;
   memberId: string;
@@ -68,6 +72,7 @@ export type CreatePartyRecord = {
   secondaryCapacity?: number;
   secondaryCrystalShare?: number;
   secondaryMinimumRate?: number;
+  shareCode: string;
 };
 
 export type AddPartyMemberRecord = {
@@ -80,10 +85,11 @@ export type AddPartyMemberRecord = {
   nickname: string;
   partyId: string;
   termsVersion?: number;
+  userId: string;
   verifiedRate: number;
 };
 
-function memberFromRow(row: MemberRow): PartyMember {
+function memberFromRow(row: MemberRow, currentUserId?: string | null): PartyMember {
   return {
     id: row.id,
     nickname: row.nickname,
@@ -94,6 +100,7 @@ function memberFromRow(row: MemberRow): PartyMember {
     verifiedRate: row.verified_rate,
     role: row.role,
     combatRole: row.combat_role ?? undefined,
+    isCurrentUser: Boolean(currentUserId && row.user_id === currentUserId),
     termsVersionAgreed: row.terms_version_agreed ?? undefined,
     termsAgreedAt: row.terms_agreed_at ?? undefined,
     joinedAt: row.joined_at,
@@ -103,6 +110,7 @@ function memberFromRow(row: MemberRow): PartyMember {
 function partyFromRow(row: PartyRow, members: PartyMember[]): PartyPost {
   return {
     id: row.id,
+    shareCode: row.share_code ?? row.id,
     bossId: row.boss_id,
     bossName: row.boss_name,
     difficulty: row.difficulty,
@@ -130,7 +138,10 @@ function partyFromRow(row: PartyRow, members: PartyMember[]): PartyPost {
 }
 
 export class PartyRepository {
-  constructor(private readonly database: D1Database) {}
+  constructor(
+    private readonly database: D1Database,
+    private readonly currentUserId?: string | null,
+  ) {}
 
   async listActiveParties(nowIso = new Date().toISOString()) {
     return this.loadParties({ nowIso });
@@ -157,19 +168,21 @@ export class PartyRepository {
     await this.database.batch([
       this.database.prepare(`
         INSERT INTO parties (
-          id, boss_id, boss_name, difficulty, capacity, minimum_rate, departure_at,
-          leader_nickname, leader_hexa, leader_rate, format_version, required_party_rate,
+          id, share_code, boss_id, boss_name, difficulty, capacity, minimum_rate, departure_at,
+          leader_user_id, leader_nickname, leader_hexa, leader_rate, format_version, required_party_rate,
           main_capacity, main_minimum_rate, secondary_capacity, secondary_minimum_rate,
           reward_preset, secondary_crystal_share, terms_version, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', ?)
       `).bind(
         record.partyId,
+        record.shareCode,
         record.bossId,
         record.bossName,
         record.difficulty,
         record.capacity,
         record.minimumRate,
         record.departureAt,
+        record.leaderUserId,
         record.leaderNickname,
         record.leaderHexa,
         record.leaderRate,
@@ -185,13 +198,14 @@ export class PartyRepository {
       ),
       this.database.prepare(`
         INSERT INTO party_members (
-          id, party_id, nickname, character_class, character_level,
+          id, party_id, user_id, nickname, character_class, character_level,
           character_image, hexa_stat, verified_rate, role, combat_role,
           terms_version_agreed, terms_agreed_at, joined_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?, ?, ?, ?)
       `).bind(
         record.memberId,
         record.partyId,
+        record.leaderUserId,
         record.leaderNickname,
         record.leaderCharacterClass,
         record.leaderCharacterLevel,
@@ -299,7 +313,7 @@ export class PartyRepository {
     const membersByParty = new Map<string, PartyMember[]>();
     for (const row of memberRows) {
       const members = membersByParty.get(row.party_id) ?? [];
-      members.push(memberFromRow(row));
+      members.push(memberFromRow(row, this.currentUserId));
       membersByParty.set(row.party_id, members);
     }
 
@@ -312,11 +326,11 @@ export class PartyRepository {
     const capacityColumn = combatRole === 'main_dealer' ? 'main_capacity' : 'secondary_capacity';
     return this.database.prepare(`
       INSERT INTO party_members (
-        id, party_id, nickname, character_class, character_level,
+        id, party_id, user_id, nickname, character_class, character_level,
         character_image, hexa_stat, verified_rate, role, combat_role,
         terms_version_agreed, terms_agreed_at, joined_at
       )
-      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?
+      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?
       FROM parties p
       WHERE p.id = ?
         AND p.status = 'open'
@@ -331,6 +345,7 @@ export class PartyRepository {
         AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
     `).bind(
       crypto.randomUUID(),
+      record.userId,
       record.nickname,
       record.characterClass,
       record.characterLevel,
@@ -352,10 +367,10 @@ export class PartyRepository {
   private insertLegacyMember(record: AddPartyMemberRecord) {
     return this.database.prepare(`
       INSERT INTO party_members (
-        id, party_id, nickname, character_class, character_level,
+        id, party_id, user_id, nickname, character_class, character_level,
         character_image, hexa_stat, verified_rate, role, joined_at
       )
-      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, 'member', ?
+      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, 'member', ?
       FROM parties p
       WHERE p.id = ?
         AND p.status = 'open'
@@ -364,6 +379,7 @@ export class PartyRepository {
         AND (SELECT COUNT(*) FROM party_members m WHERE m.party_id = p.id) < p.capacity
     `).bind(
       crypto.randomUUID(),
+      record.userId,
       record.nickname,
       record.characterClass,
       record.characterLevel,

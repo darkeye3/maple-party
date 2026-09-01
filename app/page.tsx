@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, Search, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Activity, Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, LogIn, LogOut, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -10,12 +10,14 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PartyBoard } from '@/components/party-board';
+import type { AuthResponse, AuthUser } from '@/lib/auth';
 import { BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'range' | 'all' | 'solo';
 type Sort = 'site' | 'rate' | 'difficulty';
 type NoticeKind = 'info' | 'success' | 'error';
 type View = 'parties' | 'calculator';
+type AuthMode = 'login' | 'register';
 
 const filters: Array<{ value: Filter; label: string }> = [
   { value: 'range', label: '내 기준' },
@@ -68,6 +70,14 @@ export default function Home() {
   const [notice, setNotice] = useState(`${BOSS_TABLE_VERSION.replace('MapleScouter KMS ', '')} 보스컷 표와 실제 스플라인 배율식을 적용했습니다.`);
   const [noticeKind, setNoticeKind] = useState<NoticeKind>('info');
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authLoginName, setAuthLoginName] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const requestSequence = useRef(0);
@@ -76,7 +86,23 @@ export default function Home() {
   useEffect(() => {
     const storedKey = sessionStorage.getItem('nexon-open-api-key');
     if (storedKey) queueMicrotask(() => setApiKey(storedKey));
-    return () => requestController.current?.abort();
+    const controller = new AbortController();
+    fetch('/api/auth', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json() as AuthResponse;
+        if (!response.ok) throw new Error(data.error ?? '로그인 상태를 확인하지 못했습니다.');
+        setAuthUser(data.user ?? null);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setAuthNotice(error instanceof Error ? error.message : '로그인 상태를 확인하지 못했습니다.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAuthLoading(false);
+      });
+    return () => {
+      controller.abort();
+      requestController.current?.abort();
+    };
   }, []);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
@@ -165,6 +191,65 @@ export default function Home() {
     }
   }
 
+  function openAuthDialog(mode: AuthMode, message = '') {
+    setAuthMode(mode);
+    setAuthPassword('');
+    setAuthNotice(message);
+    setAuthDialogOpen(true);
+  }
+
+  async function handleAuthSubmit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthSubmitting(true);
+    setAuthNotice('');
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: authMode,
+          loginName: authLoginName,
+          displayName: authLoginName,
+          password: authPassword,
+        }),
+      });
+      const data = await response.json() as AuthResponse;
+      if (!response.ok) throw new Error(data.error ?? '로그인 요청을 처리하지 못했습니다.');
+      setAuthUser(data.user ?? null);
+      setAuthDialogOpen(false);
+      setAuthPassword('');
+      setNoticeKind('success');
+      setNotice(`${data.user?.displayName ?? authLoginName} 계정으로 로그인했습니다.`);
+    } catch (error) {
+      setAuthNotice(error instanceof Error ? error.message : '로그인 요청을 처리하지 못했습니다.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleLogout() {
+    setAuthSubmitting(true);
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'logout' }),
+      });
+      const data = await response.json() as AuthResponse;
+      if (!response.ok) throw new Error(data.error ?? '로그아웃하지 못했습니다.');
+      setAuthUser(null);
+      setNoticeKind('info');
+      setNotice('로그아웃했습니다.');
+    } catch (error) {
+      setNoticeKind('error');
+      setNotice(error instanceof Error ? error.message : '로그아웃하지 못했습니다.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
   return (
     <Tooltip>
       <div className="min-h-screen bg-[#f5f6f8] text-[#171a21]">
@@ -182,6 +267,20 @@ export default function Home() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-7 rounded-sm px-3 text-xs ${view === 'calculator' ? 'bg-white font-bold shadow-sm hover:bg-white' : 'text-[#687080]'}`}>보스 배율</Button>
             </nav>
             <div className="flex items-center gap-2">
+              {authUser ? (
+                <>
+                  <Badge variant="outline" className="h-8 max-w-40 gap-1.5 truncate rounded-md border-[#dfe2e8] bg-[#fafbfc] px-2.5 text-[#535b68]">
+                    <UserRound className="size-3.5 shrink-0" /> <span className="truncate">{authUser.displayName}</span>
+                  </Badge>
+                  <Button type="button" variant="outline" size="sm" disabled={authSubmitting} onClick={() => void handleLogout()} className="h-8 rounded-md border-[#dfe2e8] px-2.5 text-xs text-[#535b68]">
+                    <LogOut className="size-3.5" /> 로그아웃
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" variant="outline" size="sm" disabled={authLoading} onClick={() => openAuthDialog('login')} className="h-8 rounded-md border-[#dfe2e8] px-2.5 text-xs text-[#535b68]">
+                  <LogIn className="size-3.5" /> {authLoading ? '확인 중' : '로그인'}
+                </Button>
+              )}
               <Button type="button" variant="outline" size="sm" onClick={() => setEngineDialogOpen(true)} className="h-8 rounded-md border-[#dfe2e8] px-2.5 text-xs text-[#535b68]">
                 <Activity className="size-3.5" /> 계산식
               </Button>
@@ -211,10 +310,12 @@ export default function Home() {
               characterLoading={loading}
               bossResults={allBossResults}
               apiKey={apiKey}
+              authUser={authUser}
               onNicknameChange={handleNicknameChange}
               onHexaChange={setHexaInput}
               onLookup={() => loadCharacter()}
               onOpenCalculator={() => setView('calculator')}
+              onRequireAuth={(message) => openAuthDialog('login', message)}
             />
           ) : (
           <>
@@ -362,6 +463,37 @@ export default function Home() {
             <DialogFooter className="mt-1 rounded-b-lg">
               <Button type="button" variant="outline" onClick={() => { setApiKey(''); sessionStorage.removeItem('nexon-open-api-key'); setApiDialogOpen(false); setNoticeKind('info'); setNotice('NEXON Open API 연결을 해제했습니다.'); }} className="rounded-md">연결 해제</Button>
               <Button type="submit" className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">저장 후 조회</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={authDialogOpen} onOpenChange={setAuthDialogOpen}>
+        <DialogContent className="rounded-lg sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><UserRound className="size-4 text-[#eb5b35]" /> MapleParty 로그인</DialogTitle>
+            <DialogDescription>파티 생성, 가입, 탈퇴 기록을 계정에 연결합니다.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 rounded-md border border-[#d7dbe2] bg-[#f1f3f5] p-1">
+              <button type="button" onClick={() => { setAuthMode('login'); setAuthNotice(''); }} className={`h-8 rounded-sm text-xs font-bold ${authMode === 'login' ? 'bg-white text-[#20242c] shadow-sm' : 'text-[#687080]'}`}>로그인</button>
+              <button type="button" onClick={() => { setAuthMode('register'); setAuthNotice(''); }} className={`h-8 rounded-sm text-xs font-bold ${authMode === 'register' ? 'bg-white text-[#20242c] shadow-sm' : 'text-[#687080]'}`}>회원가입</button>
+            </div>
+            <label htmlFor="auth-login-name" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">
+              아이디
+              <Input id="auth-login-name" value={authLoginName} onChange={(event) => setAuthLoginName(event.target.value)} autoComplete="username" className="h-10 rounded-md border-[#ccd1d9]" placeholder="2~20자" />
+            </label>
+            <label htmlFor="auth-password" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">
+              비밀번호
+              <Input id="auth-password" type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} className="h-10 rounded-md border-[#ccd1d9]" placeholder="6자 이상" />
+            </label>
+            <p className={`min-h-8 rounded-md px-3 py-2 text-xs ${authNotice ? 'border border-amber-200 bg-amber-50 text-amber-800' : 'bg-[#fafbfc] text-[#737b87]'}`} aria-live="polite">
+              {authNotice || (authMode === 'login' ? '가입한 아이디로 파티 행동을 이어갈 수 있습니다.' : '캐릭터 닉네임과 달라도 되지만, 나중에 소유 인증과 연결할 예정입니다.')}
+            </p>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAuthDialogOpen(false)} className="rounded-md">취소</Button>
+              <Button type="submit" disabled={authSubmitting} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">
+                {authSubmitting ? '처리 중' : authMode === 'login' ? '로그인' : '가입하기'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

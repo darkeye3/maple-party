@@ -12,6 +12,7 @@ export type PartyMember = {
   verifiedRate: number;
   role: 'leader' | 'member';
   combatRole?: CombatRole;
+  isCurrentUser?: boolean;
   termsVersionAgreed?: number;
   termsAgreedAt?: string;
   joinedAt: string;
@@ -19,6 +20,7 @@ export type PartyMember = {
 
 export type PartyPost = {
   id: string;
+  shareCode: string;
   bossId: string;
   bossName: string;
   difficulty: string;

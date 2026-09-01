@@ -1,4 +1,5 @@
 import { getBossDefinition } from '@/lib/model';
+import type { AuthUser } from '@/lib/auth';
 import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
 import { PartyRequestError } from '@/lib/server/party-errors';
 import type { PartyRepository } from '@/lib/server/party-repository';
@@ -71,6 +72,7 @@ export class PartyService {
   constructor(
     private readonly repository: PartyRepository,
     private readonly verifyCharacter: CharacterVerifier,
+    private readonly currentUser: AuthUser | null = null,
   ) {}
 
   async listParties() {
@@ -96,6 +98,7 @@ export class PartyService {
   }
 
   private async createParty(body: Record<string, unknown>) {
+    const currentUser = this.requireCurrentUser();
     const bossId = textValue(body.bossId);
     const boss = getBossDefinition(bossId);
     if (!boss || boss.partyLimit < 2) throw new PartyRequestError('파티 모집을 지원하지 않는 보스입니다.');
@@ -185,12 +188,15 @@ export class PartyService {
       leaderCharacterClass: verified.profile.characterClass,
       leaderCharacterLevel: verified.profile.level,
       leaderCharacterImage: verified.profile.image,
+      leaderUserId: currentUser.id,
+      shareCode: createShareCode(),
       createdAt,
     });
     return this.reloadParty(partyId);
   }
 
   private async joinParty(body: Record<string, unknown>) {
+    const currentUser = this.requireCurrentUser();
     const partyId = textValue(body.partyId);
     const currentParty = await this.requireParty(partyId);
     if (currentParty.status !== 'open' || currentParty.members.length >= currentParty.capacity) {
@@ -202,6 +208,9 @@ export class PartyService {
     const hexaStat = numeric(body.hexaStat);
     if (currentParty.members.some((member) => member.nickname === nickname)) {
       throw new PartyRequestError('이미 이 파티에 가입한 캐릭터입니다.', 409);
+    }
+    if (currentParty.members.some((member) => member.isCurrentUser)) {
+      throw new PartyRequestError('현재 로그인 계정은 이미 이 파티에 참가 중입니다.', 409);
     }
 
     const roleContract = currentParty.formatVersion === 'role_contract_v2';
@@ -234,12 +243,13 @@ export class PartyService {
         verifiedRate: verified.rate,
         combatRole,
         termsVersion,
+        userId: currentUser.id,
         joinedAt,
       }, roleContract);
       if (!inserted) throw new PartyRequestError('모집이 마감되었거나 가입 조건이 변경되었습니다.', 409);
     } catch (error) {
       if (error instanceof PartyRequestError) throw error;
-      if (error instanceof Error && /UNIQUE/i.test(error.message)) throw new PartyRequestError('이미 이 파티에 가입한 캐릭터입니다.', 409);
+      if (error instanceof Error && /UNIQUE|constraint/i.test(error.message)) throw new PartyRequestError('이미 이 파티에 가입한 계정 또는 캐릭터입니다.', 409);
       throw error;
     }
 
@@ -249,38 +259,34 @@ export class PartyService {
   }
 
   private async leaveParty(body: Record<string, unknown>) {
+    this.requireCurrentUser();
     const partyId = textValue(body.partyId);
     const currentParty = await this.requireParty(partyId);
     if (currentParty.status === 'cancelled') throw new PartyRequestError('이미 삭제된 모집 글입니다.', 409);
 
-    const nickname = textValue(body.nickname).trim();
-    const hexaStat = numeric(body.hexaStat);
-    const member = currentParty.members.find((item) => item.nickname === nickname);
+    const member = currentParty.members.find((item) => item.isCurrentUser);
     if (!member) throw new PartyRequestError('이 파티에 참가 중인 캐릭터가 아닙니다.', 404);
     if (member.role === 'leader') throw new PartyRequestError('파티장은 탈퇴 대신 모집 삭제를 이용해 주세요.', 403);
-    await this.verifyCharacter(nickname, hexaStat, currentParty.bossId);
 
     const leftAt = new Date().toISOString();
-    const removed = await this.repository.removeMember(partyId, nickname);
+    const removed = await this.repository.removeMember(partyId, member.nickname);
     if (!removed) throw new PartyRequestError('탈퇴할 파티 참가 정보를 찾지 못했습니다.', 404);
     await this.repository.reopenIfFutureFull(partyId, leftAt);
     return this.reloadParty(partyId);
   }
 
   private async deleteParty(body: Record<string, unknown>) {
+    this.requireCurrentUser();
     const partyId = textValue(body.partyId);
     const currentParty = await this.requireParty(partyId);
     if (currentParty.status === 'cancelled') throw new PartyRequestError('이미 삭제된 모집 글입니다.', 409);
 
-    const nickname = textValue(body.nickname).trim();
-    const hexaStat = numeric(body.hexaStat);
-    const member = currentParty.members.find((item) => item.nickname === nickname);
-    if (!member || member.role !== 'leader' || currentParty.leaderNickname !== nickname) {
+    const member = currentParty.members.find((item) => item.isCurrentUser);
+    if (!member || member.role !== 'leader' || currentParty.leaderNickname !== member.nickname) {
       throw new PartyRequestError('파티장만 모집 글을 삭제할 수 있습니다.', 403);
     }
-    await this.verifyCharacter(nickname, hexaStat, currentParty.bossId);
 
-    const cancelled = await this.repository.cancelParty(partyId, nickname);
+    const cancelled = await this.repository.cancelParty(partyId, member.nickname);
     if (!cancelled) throw new PartyRequestError('삭제할 모집 글을 찾지 못했습니다.', 404);
     return this.repository.listActiveParties();
   }
@@ -296,4 +302,13 @@ export class PartyService {
     if (!party) throw new PartyRequestError('파티 정보를 다시 불러오지 못했습니다.', 500);
     return party;
   }
+
+  private requireCurrentUser() {
+    if (!this.currentUser) throw new PartyRequestError('로그인 후 이용할 수 있습니다.', 401);
+    return this.currentUser;
+  }
+}
+
+function createShareCode() {
+  return crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 }

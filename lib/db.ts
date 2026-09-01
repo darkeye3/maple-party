@@ -1,9 +1,15 @@
 import { env } from 'cloudflare:workers';
 import {
+  createPartyMembersUserIndex,
   createPartiesTable,
+  createPartyShareCodeIndex,
   createPartyMembersIndex,
   createPartyMembersTable,
   createUpcomingPartiesIndex,
+  createUserSessionsExpiryIndex,
+  createUserSessionsTable,
+  createUserSessionsUserIndex,
+  createUsersTable,
 } from '@/db/schema';
 
 type DatabaseEnvironment = Cloudflare.Env & { DB: D1Database };
@@ -23,8 +29,14 @@ export async function ensurePartySchema() {
       await database.batch([
         database.prepare(createPartiesTable),
         database.prepare(createPartyMembersTable),
+        database.prepare(createUsersTable),
+        database.prepare(createUserSessionsTable),
         database.prepare(createUpcomingPartiesIndex),
+        database.prepare(createPartyShareCodeIndex),
         database.prepare(createPartyMembersIndex),
+        database.prepare(createPartyMembersUserIndex),
+        database.prepare(createUserSessionsUserIndex),
+        database.prepare(createUserSessionsExpiryIndex),
       ]);
       const { results } = await database.prepare('PRAGMA table_info(party_members)').all<{ name: string }>();
       if (!results.some((column) => column.name === 'character_image')) {
@@ -37,6 +49,8 @@ export async function ensurePartySchema() {
       const { results: partyColumns } = await database.prepare('PRAGMA table_info(parties)').all<{ name: string }>();
       const partyColumnNames = new Set(partyColumns.map((column) => column.name));
       const partyColumnMigrations = [
+        ['share_code', 'ALTER TABLE parties ADD COLUMN share_code TEXT'],
+        ['leader_user_id', 'ALTER TABLE parties ADD COLUMN leader_user_id TEXT'],
         ['format_version', "ALTER TABLE parties ADD COLUMN format_version TEXT NOT NULL DEFAULT 'legacy'"],
         ['required_party_rate', 'ALTER TABLE parties ADD COLUMN required_party_rate REAL'],
         ['main_capacity', 'ALTER TABLE parties ADD COLUMN main_capacity INTEGER'],
@@ -53,6 +67,7 @@ export async function ensurePartySchema() {
       }
       const memberColumnNames = new Set(results.map((column) => column.name));
       const memberColumnMigrations = [
+        ['user_id', 'ALTER TABLE party_members ADD COLUMN user_id TEXT'],
         ['combat_role', 'ALTER TABLE party_members ADD COLUMN combat_role TEXT'],
         ['terms_version_agreed', 'ALTER TABLE party_members ADD COLUMN terms_version_agreed INTEGER'],
         ['terms_agreed_at', 'ALTER TABLE party_members ADD COLUMN terms_agreed_at TEXT'],
@@ -60,10 +75,34 @@ export async function ensurePartySchema() {
       for (const [name, sql] of memberColumnMigrations) {
         if (!memberColumnNames.has(name)) await database.prepare(sql).run();
       }
+      await database.batch([
+        database.prepare(createPartyShareCodeIndex),
+        database.prepare(createPartyMembersUserIndex),
+        database.prepare(createUserSessionsUserIndex),
+        database.prepare(createUserSessionsExpiryIndex),
+      ]);
+      const { results: partiesMissingShareCode } = await database.prepare(`
+        SELECT id
+        FROM parties
+        WHERE share_code IS NULL OR share_code = ''
+      `).all<{ id: string }>();
+      for (const party of partiesMissingShareCode) {
+        await database.prepare(`
+          UPDATE parties
+          SET share_code = ?
+          WHERE id = ?
+            AND (share_code IS NULL OR share_code = '')
+        `).bind(createShortCode(), party.id).run();
+      }
+      await database.prepare('PRAGMA optimize').run();
     })().catch((error: unknown) => {
       schemaPromise = undefined;
       throw error;
     });
   }
   return schemaPromise;
+}
+
+function createShortCode() {
+  return crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 }
