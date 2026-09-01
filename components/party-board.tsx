@@ -55,7 +55,7 @@ function bossSelectionAsset(name: string, fallbackImage?: string) {
 
 function BossSelectionImage({ src, alt, className, eager = false, cropFallback = false }: { src: string; alt: string; className?: string; eager?: boolean; cropFallback?: boolean }) {
   return (
-    <span className={cn('relative block shrink-0 overflow-hidden rounded-lg border border-[#232832] bg-[#111722] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-8px_12px_rgba(0,0,0,0.34),0_1px_2px_rgba(15,18,24,0.35)]', className)}>
+    <span className={cn('relative block shrink-0', className)}>
       <Image
         src={src}
         alt={alt}
@@ -63,11 +63,9 @@ function BossSelectionImage({ src, alt, className, eager = false, cropFallback =
         sizes="72px"
         loading={eager ? 'eager' : 'lazy'}
         className={cn(
-          'object-cover',
-          cropFallback && 'origin-top scale-[1.56]',
+          cropFallback ? 'origin-top scale-[1.56] object-cover' : 'object-contain drop-shadow-[0_1px_1px_rgba(15,18,24,0.35)]',
         )}
       />
-      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset ring-white/30 shadow-[inset_0_0_0_2px_rgba(0,0,0,0.22),inset_0_-10px_12px_rgba(0,0,0,0.28)]" />
     </span>
   );
 }
