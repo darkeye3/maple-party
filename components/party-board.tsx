@@ -45,7 +45,7 @@ function BossSelectionImage({ src, alt, className, eager = false }: { src: strin
         loading={eager ? 'eager' : 'lazy'}
         className={cn(
           'object-cover object-top',
-          CROP_BOSS_SELECTION_ICONS && 'origin-top scale-[1.24]',
+          CROP_BOSS_SELECTION_ICONS && 'origin-top scale-[1.56]',
         )}
       />
     </span>
