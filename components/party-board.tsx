@@ -14,8 +14,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
+import { cn } from '@/lib/utils';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
+const CROP_BOSS_SELECTION_ICONS = true;
 const difficultyStyles: Record<string, { active: string; idle: string }> = {
   익스트림: { active: 'border-[#e55c37] bg-[#e55c37] text-white', idle: 'border-[#f1b4a4] bg-[#fff3ef] text-[#c84725]' },
   데스티니: { active: 'border-[#7155c5] bg-[#7155c5] text-white', idle: 'border-[#c8bcec] bg-[#f5f2ff] text-[#5a3cad]' },
@@ -31,6 +33,24 @@ const rewardOptions: { value: RewardPreset; title: string; description: string }
   { value: 'main_loot_equal_crystal', title: '보조격수 동행', description: '물욕템 메인만 · 결정석 전원 1/N' },
   { value: 'main_loot_adjusted_crystal', title: '보조격수 정산', description: '물욕템 메인만 · 보조 결정석 일부 정산' },
 ];
+
+function BossSelectionImage({ src, alt, className, eager = false }: { src: string; alt: string; className?: string; eager?: boolean }) {
+  return (
+    <span className={cn('relative block shrink-0 overflow-hidden rounded-md border border-[#d7dbe2] bg-[#f6f7f9]', className)}>
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        sizes="72px"
+        loading={eager ? 'eager' : 'lazy'}
+        className={cn(
+          'object-cover object-top',
+          CROP_BOSS_SELECTION_ICONS && 'origin-top scale-[1.24]',
+        )}
+      />
+    </span>
+  );
+}
 
 type PartyBoardProps = {
   profile: CharacterProfile;
@@ -503,7 +523,7 @@ export function PartyBoard({
                     className={`relative flex w-[74px] flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/40 ${selected ? 'border-[#eb5b35] bg-[#fff5f1] text-[#c74928]' : 'border-[#dfe2e8] bg-white text-[#626a77] hover:border-[#bec4ce]'}`}
                   >
                     {boss.image
-                      ? <Image src={boss.image} alt={boss.name} width={52} height={52} className="size-[52px] rounded-md border border-[#d7dbe2] object-cover" />
+                      ? <BossSelectionImage src={boss.image} alt={boss.name} className="size-[52px]" />
                       : <span className="grid size-[52px] place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{boss.name}</span>}
                     <span className="w-full truncate">{boss.name}</span>
                     <span className={`absolute right-1 top-1 min-w-5 rounded-full border-2 border-white px-1 text-center text-[10px] leading-4 text-white ${selected ? 'bg-[#eb5b35]' : 'bg-[#20242c]'}`}>{boss.count}</span>
@@ -597,7 +617,7 @@ export function PartyBoard({
                     className="flex h-[72px] w-full items-center gap-3 rounded-md border border-[#ccd1d9] bg-white px-3 text-left outline-none transition-colors hover:border-[#9fa6b1] focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30"
                   >
                     {selectedBoss?.image
-                      ? <Image src={selectedBoss.image} alt="" width={54} height={54} loading="eager" className="size-[54px] shrink-0 rounded-md border border-[#d7dbe2] object-cover" />
+                      ? <BossSelectionImage src={selectedBoss.image} alt="" eager className="size-[54px]" />
                       : <span className="grid size-[54px] shrink-0 place-items-center rounded-md bg-[#252a32] px-1 text-center text-[10px] font-bold text-white">{bossName}</span>}
                     <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-[#8a919d]">선택한 보스</span><strong className="mt-0.5 block truncate text-sm text-[#252a32]">{bossName}</strong></span>
                     <ChevronDown className={`size-4 shrink-0 text-[#747b88] transition-transform ${bossPickerOpen ? 'rotate-180' : ''}`} />
@@ -617,7 +637,7 @@ export function PartyBoard({
                               className={`relative flex min-h-[92px] flex-col items-center justify-center gap-1.5 rounded-md border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff4ef]' : 'border-[#dfe2e8] bg-white hover:border-[#b6bcc6] hover:bg-[#fafbfc]'}`}
                             >
                               {boss.image
-                                ? <Image src={boss.image} alt="" width={58} height={58} loading="eager" className="size-[58px] rounded-md border border-[#d7dbe2] object-cover" />
+                                ? <BossSelectionImage src={boss.image} alt="" eager className="size-[58px]" />
                                 : <span className="grid size-[58px] place-items-center rounded-md bg-[#252a32] px-1 text-[10px] font-bold text-white">{boss.name}</span>}
                               <span className={`w-full truncate text-xs font-bold ${selected ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{boss.name}</span>
                               {selected && <span className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-[#eb5b35] text-white"><Check className="size-3" /></span>}
