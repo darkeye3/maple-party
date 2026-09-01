@@ -47,11 +47,32 @@ type PartyBoardProps = {
   onOpenCalculator: () => void;
 };
 
-function localDateTimeValue(offsetHours = 2) {
-  const date = new Date(Date.now() + offsetHours * 60 * 60_000);
-  date.setMinutes(Math.ceil(date.getMinutes() / 10) * 10, 0, 0);
+function localDateTimeFromDate(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+function roundedLocalDateTime(offsetMs: number, direction: 'ceil' | 'floor') {
+  const unit = 10 * 60_000;
+  const value = Date.now() + offsetMs;
+  return localDateTimeFromDate(new Date((direction === 'ceil' ? Math.ceil(value / unit) : Math.floor(value / unit)) * unit));
+}
+
+function localDateTimeValue(offsetHours = 2) {
+  return roundedLocalDateTime(offsetHours * 60 * 60_000, 'ceil');
+}
+
+function createDepartureBounds() {
+  return {
+    min: roundedLocalDateTime(10 * 60_000, 'ceil'),
+    max: roundedLocalDateTime(30 * 24 * 60 * 60_000, 'floor'),
+  };
+}
+
+function hourLabel(hour: number) {
+  const period = hour < 12 ? '오전' : '오후';
+  const displayHour = hour % 12 || 12;
+  return `${period} ${displayHour}시`;
 }
 
 function departureLabel(value: string) {
@@ -166,6 +187,7 @@ export function PartyBoard({
   const [secondaryCrystalShare, setSecondaryCrystalShare] = useState('70');
   const [selectedJoinRole, setSelectedJoinRole] = useState<CombatRole>('main_dealer');
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [departureBounds, setDepartureBounds] = useState(createDepartureBounds);
   const [departureAt, setDepartureAt] = useState(localDateTimeValue());
   const selectedCapacity = Math.min(Math.max(Number(capacity) || 2, 2), selectedBoss?.partyLimit ?? 2);
   const selectedMainCapacity = Math.min(Math.max(Number(mainCapacity) || 1, 1), selectedCapacity);
@@ -235,6 +257,13 @@ export function PartyBoard({
     setBossName(value);
     setBossId(partyBosses.find((boss) => boss.name === value)?.id ?? '');
     setBossPickerOpen(false);
+  }
+
+  function updateDeparturePart(part: 'date' | 'hour' | 'minute', value: string) {
+    const [currentDate, currentTime = '00:00'] = departureAt.split('T');
+    const [currentHour = '00', currentMinute = '00'] = currentTime.split(':');
+    const next = `${part === 'date' ? value : currentDate}T${part === 'hour' ? value : currentHour}:${part === 'minute' ? value : currentMinute}`;
+    setDepartureAt(next < departureBounds.min ? departureBounds.min : next > departureBounds.max ? departureBounds.max : next);
   }
 
   const myRates = useMemo(() => new Map(partyBosses.map((boss) => [boss.id, boss.rate])), [partyBosses]);
@@ -371,7 +400,10 @@ export function PartyBoard({
       setNotice('현재 파티 배율 검증은 비숍만 지원합니다.');
       return;
     }
-    setDepartureAt(localDateTimeValue());
+    const bounds = createDepartureBounds();
+    const suggested = localDateTimeValue();
+    setDepartureBounds(bounds);
+    setDepartureAt(suggested < bounds.min ? bounds.min : suggested > bounds.max ? bounds.max : suggested);
     setBossPickerOpen(false);
     setNotice('');
     setCreateOpen(true);
@@ -643,7 +675,14 @@ export function PartyBoard({
               <div className="grid gap-2">{rewardOptions.map((option) => <button key={option.value} type="button" aria-pressed={rewardPreset === option.value} onClick={() => setRewardPreset(option.value)} className={`flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 py-2 text-left ${rewardPreset === option.value ? 'border-[#eb5b35] bg-[#fff5f1]' : 'border-[#dfe2e8] bg-white hover:border-[#bec4ce]'}`}><span><strong className={`block text-xs ${rewardPreset === option.value ? 'text-[#c74928]' : 'text-[#454c57]'}`}>{option.title}</strong><span className="mt-0.5 block text-[11px] text-[#7a818d]">{option.description}</span></span>{rewardPreset === option.value && <Check className="size-4 shrink-0 text-[#eb5b35]" />}</button>)}</div>
               {rewardPreset === 'main_loot_adjusted_crystal' && <label htmlFor="party-secondary-share" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">보조격수 결정석 수령 비율<Input id="party-secondary-share" type="number" min="0" max="100" step="1" value={secondaryCrystalShare} onChange={(event) => setSecondaryCrystalShare(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /><span className="block font-normal text-[#858c97]">{Number(secondaryCrystalShare) || 0}% 수령 · {Math.max(0, 100 - (Number(secondaryCrystalShare) || 0))}% 정산</span></label>}
             </section>
-            <label htmlFor="party-departure" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">출발 시간<Input id="party-departure" type="datetime-local" value={departureAt} onChange={(event) => setDepartureAt(event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+            <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
+              <div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><CalendarClock className="size-3.5 text-[#eb5b35]" />출발 시간</h3><p className="text-[10px] text-[#858c97]">{departureBounds.min.slice(0, 10)} ~ {departureBounds.max.slice(0, 10)}</p></div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_112px_86px]">
+                <label htmlFor="party-departure-date" className="col-span-2 space-y-1.5 text-xs font-semibold text-[#535b68] sm:col-span-1">날짜<Input id="party-departure-date" type="date" min={departureBounds.min.slice(0, 10)} max={departureBounds.max.slice(0, 10)} value={departureAt.slice(0, 10)} onChange={(event) => updateDeparturePart('date', event.target.value)} className="h-10 rounded-md border-[#ccd1d9]" /></label>
+                <label htmlFor="party-departure-hour" className="space-y-1.5 text-xs font-semibold text-[#535b68]">시간<NativeSelect id="party-departure-hour" value={departureAt.slice(11, 13)} onChange={(event) => updateDeparturePart('hour', event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: 24 }, (_, hour) => <NativeSelectOption key={hour} value={String(hour).padStart(2, '0')}>{hourLabel(hour)}</NativeSelectOption>)}</NativeSelect></label>
+                <label htmlFor="party-departure-minute" className="space-y-1.5 text-xs font-semibold text-[#535b68]">분<NativeSelect id="party-departure-minute" value={departureAt.slice(14, 16)} onChange={(event) => updateDeparturePart('minute', event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: 6 }, (_, index) => String(index * 10).padStart(2, '0')).map((minute) => <NativeSelectOption key={minute} value={minute}>{minute}분</NativeSelectOption>)}</NativeSelect></label>
+              </div>
+            </section>
             <div className="rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs leading-5 text-[#687080]">파티장 {nickname || '-'} · {roleLabel(effectiveLeaderCombatRole)} · 헥환 {hexaStat.toLocaleString()}<br />현재 {selectedBoss ? rateLabel(selectedBoss.rate) : '-'} · 목표 {rateLabel(Number(requiredPartyRate) || 0)} · 메인 {selectedMainCapacity}명 / 보조 {selectedSecondaryCapacity}명</div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setCreateOpen(false)} className="rounded-md">취소</Button><Button type="submit" disabled={submitting} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">{submitting ? '검증 중' : '모집 시작'}</Button></DialogFooter>
           </form>
