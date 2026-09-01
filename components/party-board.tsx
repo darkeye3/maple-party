@@ -13,13 +13,12 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
 import type { AuthUser } from '@/lib/auth';
+import type { RegisteredCharacter, RegisteredCharactersResponse } from '@/lib/characters';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
 import { cn } from '@/lib/utils';
 
 const DEPARTING_SOON_MS = 3 * 60 * 60_000;
-const RATE_PRESETS_STORAGE_KEY = 'maple-party-rate-presets';
-const DEFAULT_RATE_PRESETS = ['110', '130', '150'];
 const USE_BOSS_SELECTOR_ICONS = true;
 const CROP_FALLBACK_BOSS_SELECTION_ICONS = true;
 const BOSS_SELECTION_IMAGE_BY_NAME: Record<string, string> = {
@@ -98,6 +97,7 @@ type PartyBoardProps = {
   onNicknameChange: (value: string) => void;
   onHexaChange: (value: string) => void;
   onLookup: () => Promise<void>;
+  onUseRegisteredCharacter: (character: RegisteredCharacter) => Promise<void>;
   onOpenCalculator: () => void;
   onRequireAuth: (message: string) => void;
 };
@@ -198,6 +198,13 @@ async function fetchPartyList(signal?: AbortSignal) {
   return data.parties ?? [];
 }
 
+async function fetchRegisteredCharacters(signal?: AbortSignal) {
+  const response = await fetch('/api/my-characters', { cache: 'no-store', credentials: 'same-origin', signal });
+  const data = await response.json() as RegisteredCharactersResponse;
+  if (!response.ok) throw new Error(data.error ?? '내 캐릭터를 불러오지 못했습니다.');
+  return data.characters ?? [];
+}
+
 export function PartyBoard({
   profile,
   nickname,
@@ -211,6 +218,7 @@ export function PartyBoard({
   onNicknameChange,
   onHexaChange,
   onLookup,
+  onUseRegisteredCharacter,
   onOpenCalculator,
   onRequireAuth,
 }: PartyBoardProps) {
@@ -231,6 +239,9 @@ export function PartyBoard({
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<PartyPost | null>(null);
   const directPartyCodeRef = useRef<string | null>(null);
+  const [registeredCharacters, setRegisteredCharacters] = useState<RegisteredCharacter[]>([]);
+  const [charactersLoading, setCharactersLoading] = useState(false);
+  const [charactersSubmitting, setCharactersSubmitting] = useState(false);
   const [bossName, setBossName] = useState(bossNames[0] ?? '');
   const difficultyOptions = useMemo(() => (
     partyBosses
@@ -242,8 +253,6 @@ export function PartyBoard({
   const selectedBossSelectionAsset = bossSelectionAsset(selectedBoss?.name ?? bossName, selectedBoss?.image);
   const [capacity, setCapacity] = useState('6');
   const [requiredPartyRate, setRequiredPartyRate] = useState('130');
-  const [ratePresets, setRatePresets] = useState(DEFAULT_RATE_PRESETS);
-  const [ratePresetDraft, setRatePresetDraft] = useState('');
   const [secondaryEnabled, setSecondaryEnabled] = useState(false);
   const [mainCapacity, setMainCapacity] = useState('2');
   const [mainMinimumRate, setMainMinimumRate] = useState('40');
@@ -272,12 +281,6 @@ export function PartyBoard({
     const asset = bossSelectionAsset(name, image);
     return { name, image: asset.src, cropFallback: asset.cropFallback };
   }), [bossNames, partyBosses]);
-  const sortedRatePresets = useMemo(() => (
-    [...new Set(ratePresets)]
-      .filter((rate) => Number(rate) >= 1 && Number(rate) <= 1000)
-      .sort((left, right) => Number(left) - Number(right))
-  ), [ratePresets]);
-
   async function refreshParties() {
     setListLoading(true);
     if (departingSoonOnly) setDepartingSoonReference(Date.now());
@@ -291,26 +294,6 @@ export function PartyBoard({
   }
 
   useEffect(() => {
-    const storedPresets = localStorage.getItem(RATE_PRESETS_STORAGE_KEY);
-    if (!storedPresets) return;
-    try {
-      const parsed = JSON.parse(storedPresets) as unknown;
-      if (Array.isArray(parsed)) {
-        const next = parsed
-          .map((item) => String(Number(item)))
-          .filter((item) => Number(item) >= 1 && Number(item) <= 1000);
-        if (next.length) setRatePresets([...new Set(next)]);
-      }
-    } catch {
-      localStorage.removeItem(RATE_PRESETS_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(RATE_PRESETS_STORAGE_KEY, JSON.stringify(sortedRatePresets));
-  }, [sortedRatePresets]);
-
-  useEffect(() => {
     const controller = new AbortController();
     fetchPartyList(controller.signal)
       .then((items) => setParties(items))
@@ -322,6 +305,24 @@ export function PartyBoard({
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setRegisteredCharacters([]);
+      return;
+    }
+    const controller = new AbortController();
+    setCharactersLoading(true);
+    fetchRegisteredCharacters(controller.signal)
+      .then((items) => setRegisteredCharacters(items))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : '내 캐릭터를 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCharactersLoading(false);
+      });
+    return () => controller.abort();
+  }, [authUser]);
 
   useEffect(() => {
     if (!profileMatchesNickname || !profile.image) return;
@@ -578,6 +579,67 @@ export function PartyBoard({
     setCreateOpen(true);
   }
 
+  async function saveCurrentCharacter() {
+    if (!authUser) return onRequireAuth('캐릭터 등록은 로그인 후 이용할 수 있습니다.');
+    if (!profileMatchesNickname) {
+      setNotice('현재 닉네임을 먼저 조회한 뒤 캐릭터를 등록해 주세요.');
+      return;
+    }
+    if (!hexaStat) {
+      setNotice('헥사환산을 입력한 뒤 캐릭터를 등록해 주세요.');
+      return;
+    }
+    setCharactersSubmitting(true);
+    setNotice('');
+    try {
+      const response = await fetch('/api/my-characters', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save',
+          nickname: profile.nickname,
+          hexaStat,
+          characterClass: profile.characterClass,
+          characterLevel: profile.level,
+          characterImage: profile.image,
+          arcaneForce: profile.arcaneForce,
+          authenticForce: profile.authenticForce,
+        }),
+      });
+      const data = await response.json() as RegisteredCharactersResponse;
+      if (!response.ok) throw new Error(data.error ?? '캐릭터를 등록하지 못했습니다.');
+      setRegisteredCharacters(data.characters ?? []);
+      setNotice(`${profile.nickname} 캐릭터를 내 계정에 등록했습니다.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '캐릭터를 등록하지 못했습니다.');
+    } finally {
+      setCharactersSubmitting(false);
+    }
+  }
+
+  async function deleteRegisteredCharacter(character: RegisteredCharacter) {
+    if (!window.confirm(`${character.nickname} 캐릭터 등록을 삭제할까요?`)) return;
+    setCharactersSubmitting(true);
+    setNotice('');
+    try {
+      const response = await fetch('/api/my-characters', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', characterId: character.id }),
+      });
+      const data = await response.json() as RegisteredCharactersResponse;
+      if (!response.ok) throw new Error(data.error ?? '캐릭터 등록을 삭제하지 못했습니다.');
+      setRegisteredCharacters(data.characters ?? []);
+      setNotice(`${character.nickname} 캐릭터 등록을 삭제했습니다.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '캐릭터 등록을 삭제하지 못했습니다.');
+    } finally {
+      setCharactersSubmitting(false);
+    }
+  }
+
   function setPartyAddress(party?: PartyPost) {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
@@ -644,25 +706,6 @@ export function PartyBoard({
     }
   }
 
-  function addRatePreset() {
-    const normalized = String(Math.round(Number(ratePresetDraft)));
-    const value = Number(normalized);
-    if (!Number.isFinite(value) || value < 1 || value > 1000) {
-      setNotice('배율 프리셋은 1%부터 1,000% 사이로 추가해 주세요.');
-      return;
-    }
-    setRatePresets((current) => [...new Set([...current, normalized])]);
-    setRequiredPartyRate(normalized);
-    setRatePresetDraft('');
-  }
-
-  function removeRatePreset(rate: string) {
-    const next = sortedRatePresets.filter((item) => item !== rate);
-    const fallback = next[0] ?? DEFAULT_RATE_PRESETS[0];
-    setRatePresets(next.length ? next : DEFAULT_RATE_PRESETS);
-    if (requiredPartyRate === rate) setRequiredPartyRate(fallback);
-  }
-
   const selectedMyRate = selectedParty ? myRates.get(selectedParty.bossId) : undefined;
   const selectedMember = selectedParty?.members.find((member) => member.isCurrentUser)
     ?? selectedParty?.members.find((member) => member.nickname === nickname.trim());
@@ -714,6 +757,45 @@ export function PartyBoard({
               <Button type="button" variant="ghost" size="sm" onClick={onOpenCalculator} className="h-6 px-2 text-xs">전체 배율 보기</Button>
             </div>
           </div>
+          {authUser && (
+            <section className="mt-3 rounded-md border border-[#dfe2e8] bg-white px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-xs font-bold text-[#343a44]">내 캐릭터</h2>
+                  <p className="mt-0.5 text-[11px] text-[#858c97]">조회한 닉네임과 헥환을 계정에 저장해 파티 신청 때 다시 불러옵니다.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" disabled={charactersSubmitting || characterLoading || !profileMatchesNickname} onClick={() => void saveCurrentCharacter()} className="h-8 rounded-md border-[#ccd1d9] text-xs">
+                  <Plus className="size-3.5" />{charactersSubmitting ? '저장 중' : '현재 캐릭터 등록'}
+                </Button>
+              </div>
+              {charactersLoading ? (
+                <p className="mt-2 rounded-md bg-[#fafbfc] px-3 py-2 text-xs text-[#737b87]">내 캐릭터를 불러오는 중입니다.</p>
+              ) : registeredCharacters.length ? (
+                <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1">
+                  {registeredCharacters.map((character) => {
+                    const selected = profileMatchesNickname && character.nickname === profile.nickname && character.hexaStat === hexaStat;
+                    return (
+                      <article key={character.id} className={`relative flex min-w-[210px] items-center gap-2 rounded-md border bg-[#fafbfc] p-2 ${selected ? 'border-[#eb5b35] ring-2 ring-[#eb5b35]/15' : 'border-[#dfe2e8]'}`}>
+                        <button type="button" onClick={() => void onUseRegisteredCharacter(character)} className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30">
+                          <span className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-full border border-[#d8dce2] bg-[#f3f5f7]">
+                            {character.characterImage ? <Image unoptimized src={character.characterImage} alt="" width={96} height={96} className="size-20 max-w-none object-contain" /> : <CircleUserRound className="size-6 text-[#8a919d]" />}
+                          </span>
+                          <span className="min-w-0">
+                            <strong className="block truncate text-xs text-[#20242c]">{character.nickname}</strong>
+                            <span className="mt-0.5 block truncate text-[11px] text-[#737b87]">{character.characterClass} · Lv.{character.characterLevel}</span>
+                            <span className="mt-0.5 block text-[11px] font-bold tabular-nums text-[#1f5ed5]">헥환 {character.hexaStat.toLocaleString()}</span>
+                          </span>
+                        </button>
+                        <Button type="button" variant="ghost" size="sm" disabled={charactersSubmitting} aria-label={`${character.nickname} 등록 삭제`} onClick={() => void deleteRegisteredCharacter(character)} className="absolute right-1 top-1 size-6 rounded-full p-0 text-[#858c97] hover:bg-white hover:text-[#c74928]"><X className="size-3.5" /></Button>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 rounded-md bg-[#fafbfc] px-3 py-2 text-xs text-[#737b87]">아직 등록된 캐릭터가 없습니다. 닉네임을 조회한 뒤 현재 캐릭터 등록을 눌러 주세요.</p>
+              )}
+            </section>
+          )}
           {notice && <p className="mt-2 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs font-medium text-[#535b68]" aria-live="polite">{notice}</p>}
         </div>
       </section>
@@ -906,21 +988,7 @@ export function PartyBoard({
 
             <section className="space-y-2 border-t border-[#e3e6eb] pt-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Target className="size-3.5 text-[#eb5b35]" />20분 목표</h3><p className="mt-0.5 text-[11px] text-[#858c97]">자주 쓰는 목표 배율을 직접 저장해서 선택할 수 있습니다.</p></div>
-                <div className="flex max-w-full flex-col items-end gap-1.5">
-                  <div className="flex max-w-full flex-wrap justify-end gap-1">
-                    {sortedRatePresets.map((rate) => (
-                      <span key={rate} className={`inline-flex h-7 overflow-hidden rounded-sm border text-[11px] font-bold ${requiredPartyRate === rate ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#59616e]'}`}>
-                        <button type="button" onClick={() => setRequiredPartyRate(rate)} className="px-2 outline-none focus-visible:bg-white/70">{rate}%</button>
-                        <button type="button" aria-label={`${rate}% 프리셋 삭제`} onClick={() => removeRatePreset(rate)} className="grid w-6 place-items-center border-l border-inherit text-current/70 hover:bg-black/5"><X className="size-3" /></button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex w-[188px] max-w-full gap-1">
-                    <Input inputMode="numeric" value={ratePresetDraft} onChange={(event) => setRatePresetDraft(event.target.value.replace(/[^0-9]/g, ''))} className="h-8 rounded-md border-[#ccd1d9] text-xs" placeholder="프리셋 추가" />
-                    <Button type="button" variant="outline" size="sm" onClick={addRatePreset} className="h-8 rounded-md px-2 text-xs"><Plus className="size-3.5" /></Button>
-                  </div>
-                </div>
+                <div><h3 className="flex items-center gap-1.5 text-xs font-bold text-[#343a44]"><Target className="size-3.5 text-[#eb5b35]" />20분 목표</h3><p className="mt-0.5 text-[11px] text-[#858c97]">파티원이 합산해서 넘겨야 할 목표 배율을 직접 입력합니다.</p></div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label htmlFor="party-capacity" className="space-y-1.5 text-xs font-semibold text-[#535b68]">총 인원<NativeSelect id="party-capacity" value={String(selectedCapacity)} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-md border-[#ccd1d9] bg-white">{Array.from({ length: Math.max(0, (selectedBoss?.partyLimit ?? 2) - 1) }, (_, index) => index + 2).map((count) => <NativeSelectOption key={count} value={String(count)}>{count}명</NativeSelectOption>)}</NativeSelect></label>

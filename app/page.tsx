@@ -11,6 +11,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PartyBoard } from '@/components/party-board';
 import type { AuthResponse, AuthUser } from '@/lib/auth';
+import type { RegisteredCharacter } from '@/lib/characters';
 import { BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'range' | 'all' | 'solo';
@@ -124,12 +125,15 @@ export default function Home() {
     return filtered;
   }, [allBossResults, filter, sort]);
 
-  async function loadCharacter(key = apiKey) {
-    if (!nickname.trim()) {
+  async function loadCharacter(key = apiKey, override?: { nickname?: string; hexaInput?: string }) {
+    const targetNickname = (override?.nickname ?? nickname).trim();
+    const targetHexaInput = override?.hexaInput ?? hexaInput;
+    const targetHexa = Math.max(0, Number(targetHexaInput.replace(/,/g, '')) || 0);
+    if (!targetNickname) {
       setNoticeKind('error');
       return setNotice('닉네임을 입력해 주세요.');
     }
-    if (!hexa) {
+    if (!targetHexa) {
       setNoticeKind('error');
       return setNotice('헥사환산 값을 입력해 주세요.');
     }
@@ -138,9 +142,9 @@ export default function Home() {
     requestController.current?.abort();
     const controller = new AbortController();
     requestController.current = controller;
-    setLoading(true);
+      setLoading(true);
     try {
-      const response = await fetch(`/api/character?nickname=${encodeURIComponent(nickname.trim())}&refresh=1`, {
+      const response = await fetch(`/api/character?nickname=${encodeURIComponent(targetNickname)}&refresh=1`, {
         headers: key ? { 'x-nexon-api-key': key } : {},
         signal: controller.signal,
       });
@@ -175,6 +179,15 @@ export default function Home() {
       setNoticeKind('info');
       setNotice(`현재 결과는 ${profile.nickname} 기준입니다. 계산하기를 눌러 새 캐릭터 정보를 불러오세요.`);
     }
+  }
+
+  async function handleUseRegisteredCharacter(character: RegisteredCharacter) {
+    const nextHexa = String(character.hexaStat);
+    setNickname(character.nickname);
+    setHexaInput(nextHexa);
+    setNoticeKind('info');
+    setNotice(`${character.nickname} 등록 캐릭터를 불러와 최신 정보를 조회합니다.`);
+    await loadCharacter(apiKey, { nickname: character.nickname, hexaInput: nextHexa });
   }
 
   async function handleApiKeySave(event: SyntheticEvent<HTMLFormElement>) {
@@ -314,6 +327,7 @@ export default function Home() {
               onNicknameChange={handleNicknameChange}
               onHexaChange={setHexaInput}
               onLookup={() => loadCharacter()}
+              onUseRegisteredCharacter={handleUseRegisteredCharacter}
               onOpenCalculator={() => setView('calculator')}
               onRequireAuth={(message) => openAuthDialog('login', message)}
             />
@@ -480,14 +494,14 @@ export default function Home() {
             </div>
             <label htmlFor="auth-login-name" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">
               아이디
-              <Input id="auth-login-name" value={authLoginName} onChange={(event) => setAuthLoginName(event.target.value)} autoComplete="username" className="h-10 rounded-md border-[#ccd1d9]" placeholder="2~20자" />
+              <Input id="auth-login-name" value={authLoginName} onChange={(event) => setAuthLoginName(event.target.value)} autoComplete="username" className="h-10 rounded-md border-[#ccd1d9]" placeholder={authMode === 'register' ? '영문+숫자 6~20자' : '아이디'} />
             </label>
             <label htmlFor="auth-password" className="block space-y-1.5 text-xs font-semibold text-[#535b68]">
               비밀번호
-              <Input id="auth-password" type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} className="h-10 rounded-md border-[#ccd1d9]" placeholder="6자 이상" />
+              <Input id="auth-password" type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} className="h-10 rounded-md border-[#ccd1d9]" placeholder={authMode === 'register' ? '영문+숫자 6자 이상' : '비밀번호'} />
             </label>
             <p className={`min-h-8 rounded-md px-3 py-2 text-xs ${authNotice ? 'border border-amber-200 bg-amber-50 text-amber-800' : 'bg-[#fafbfc] text-[#737b87]'}`} aria-live="polite">
-              {authNotice || (authMode === 'login' ? '가입한 아이디로 파티 행동을 이어갈 수 있습니다.' : '캐릭터 닉네임과 달라도 되지만, 나중에 소유 인증과 연결할 예정입니다.')}
+              {authNotice || (authMode === 'login' ? '가입한 아이디로 파티 행동을 이어갈 수 있습니다.' : '아이디와 비밀번호 모두 영문, 숫자를 포함해 6자 이상으로 만들어 주세요.')}
             </p>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAuthDialogOpen(false)} className="rounded-md">취소</Button>

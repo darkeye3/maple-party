@@ -35,9 +35,22 @@ function validateLoginName(loginName: string) {
   }
 }
 
+function validateNewLoginName(loginName: string) {
+  if (!/^[A-Za-z0-9]{6,20}$/.test(loginName) || !/[A-Za-z]/.test(loginName) || !/[0-9]/.test(loginName)) {
+    throw new AuthRequestError('회원가입 아이디는 영문과 숫자를 모두 포함해 6~20자로 입력해 주세요.');
+  }
+}
+
 function validatePassword(password: string) {
   if (password.length < 6 || password.length > 72) {
     throw new AuthRequestError('비밀번호는 6~72자로 입력해 주세요.');
+  }
+}
+
+function validateNewPassword(password: string) {
+  validatePassword(password);
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    throw new AuthRequestError('회원가입 비밀번호는 영문과 숫자를 모두 포함해 6자 이상으로 입력해 주세요.');
   }
 }
 
@@ -152,8 +165,8 @@ export class AuthService {
   async register(body: Record<string, unknown>, requestUrl: string): Promise<AuthActionResult> {
     const loginName = normalizeLoginName(body.loginName);
     const password = textValue(body.password);
-    validateLoginName(loginName);
-    validatePassword(password);
+    validateNewLoginName(loginName);
+    validateNewPassword(password);
 
     const displayName = normalizeDisplayName(body.displayName, loginName);
     const salt = randomBytes(16);

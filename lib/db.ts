@@ -6,6 +6,8 @@ import {
   createPartyMembersIndex,
   createPartyMembersTable,
   createUpcomingPartiesIndex,
+  createUserCharactersTable,
+  createUserCharactersUserIndex,
   createUserSessionsExpiryIndex,
   createUserSessionsTable,
   createUserSessionsUserIndex,
@@ -31,12 +33,14 @@ export async function ensurePartySchema() {
         database.prepare(createPartyMembersTable),
         database.prepare(createUsersTable),
         database.prepare(createUserSessionsTable),
+        database.prepare(createUserCharactersTable),
         database.prepare(createUpcomingPartiesIndex),
         database.prepare(createPartyShareCodeIndex),
         database.prepare(createPartyMembersIndex),
         database.prepare(createPartyMembersUserIndex),
         database.prepare(createUserSessionsUserIndex),
         database.prepare(createUserSessionsExpiryIndex),
+        database.prepare(createUserCharactersUserIndex),
       ]);
       const { results } = await database.prepare('PRAGMA table_info(party_members)').all<{ name: string }>();
       if (!results.some((column) => column.name === 'character_image')) {
@@ -80,6 +84,7 @@ export async function ensurePartySchema() {
         database.prepare(createPartyMembersUserIndex),
         database.prepare(createUserSessionsUserIndex),
         database.prepare(createUserSessionsExpiryIndex),
+        database.prepare(createUserCharactersUserIndex),
       ]);
       const { results: partiesMissingShareCode } = await database.prepare(`
         SELECT id
