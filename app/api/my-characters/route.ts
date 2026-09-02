@@ -3,6 +3,8 @@ import { AuthRepository } from '@/lib/server/auth-repository';
 import { getCurrentAuthUser } from '@/lib/server/auth-service';
 import { UserCharacterRepository } from '@/lib/server/user-character-repository';
 
+const MAX_REGISTERED_CHARACTERS = 6;
+
 class CharacterRequestError extends Error {
   constructor(message: string, readonly status = 400) {
     super(message);
@@ -88,6 +90,13 @@ export async function POST(request: Request) {
 
     if (action === 'save') {
       const values = validateSaveBody(body);
+      const existing = await repository.findByNickname(user.id, values.nickname);
+      if (!existing) {
+        const currentCharacters = await repository.listByUser(user.id);
+        if (currentCharacters.length >= MAX_REGISTERED_CHARACTERS) {
+          throw new CharacterRequestError(`캐릭터는 최대 ${MAX_REGISTERED_CHARACTERS}개까지 등록할 수 있습니다.`, 409);
+        }
+      }
       const character = await repository.upsert({
         id: crypto.randomUUID(),
         userId: user.id,

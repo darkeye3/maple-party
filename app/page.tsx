@@ -20,6 +20,8 @@ type NoticeKind = 'info' | 'success' | 'error';
 type View = 'parties' | 'calculator';
 type AuthMode = 'login' | 'register';
 
+const MAX_REGISTERED_CHARACTERS = 6;
+
 const filters: Array<{ value: Filter; label: string }> = [
   { value: 'range', label: '내 기준' },
   { value: 'all', label: '전체' },
@@ -89,6 +91,13 @@ export default function Home() {
   const [registeredCharacters, setRegisteredCharacters] = useState<RegisteredCharacter[]>([]);
   const [charactersLoading, setCharactersLoading] = useState(false);
   const [charactersSubmitting, setCharactersSubmitting] = useState(false);
+  const [characterDialogOpen, setCharacterDialogOpen] = useState(false);
+  const [characterDraftName, setCharacterDraftName] = useState('');
+  const [characterDraftHexa, setCharacterDraftHexa] = useState('');
+  const [characterPreview, setCharacterPreview] = useState<CharacterProfile | null>(null);
+  const [characterPreviewHexa, setCharacterPreviewHexa] = useState(0);
+  const [characterPreviewLoading, setCharacterPreviewLoading] = useState(false);
+  const [characterDialogNotice, setCharacterDialogNotice] = useState('');
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const requestSequence = useRef(0);
@@ -138,6 +147,11 @@ export default function Home() {
   }, [authUser]);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
+  const draftHexa = Math.max(0, Number(characterDraftHexa.replace(/,/g, '')) || 0);
+  const draftNickname = characterDraftName.trim();
+  const previewNickname = characterPreview?.nickname ?? draftNickname;
+  const previewIsExistingCharacter = registeredCharacters.some((character) => character.nickname === previewNickname);
+  const characterLimitReached = registeredCharacters.length >= MAX_REGISTERED_CHARACTERS && !previewIsExistingCharacter;
   const exactAnchor = hexa === REFERENCE_HEXA && profile.source === 'reference';
   const profileMatchesNickname = nickname.trim() === profile.nickname;
   const engine = useMemo(() => calculateEngineSummary(hexa, profile), [hexa, profile]);
@@ -221,16 +235,80 @@ export default function Home() {
     await loadCharacter(apiKey, { nickname: character.nickname, hexaInput: nextHexa });
   }
 
-  async function saveCurrentCharacter() {
+  function openCharacterDialog() {
     if (!authUser) return openAuthDialog('login', '캐릭터 등록은 로그인 후 이용할 수 있습니다.');
-    if (!profileMatchesNickname) {
-      setNoticeKind('error');
-      setNotice('현재 닉네임을 먼저 조회한 뒤 캐릭터를 등록해 주세요.');
+    setCharacterDraftName(profileMatchesNickname ? profile.nickname : nickname.trim());
+    setCharacterDraftHexa(hexa ? String(hexa) : '');
+    setCharacterPreview(null);
+    setCharacterPreviewHexa(0);
+    setCharacterDialogNotice(registeredCharacters.length >= MAX_REGISTERED_CHARACTERS
+      ? `새 캐릭터는 최대 ${MAX_REGISTERED_CHARACTERS}개까지 등록할 수 있습니다. 기존 캐릭터를 다시 조회하면 업데이트할 수 있습니다.`
+      : '닉네임과 헥사환산을 입력한 뒤 카드 확인을 눌러 주세요.');
+    setCharacterDialogOpen(true);
+  }
+
+  function handleCharacterDraftNameChange(value: string) {
+    setCharacterDraftName(value);
+    setCharacterPreview(null);
+    setCharacterPreviewHexa(0);
+    setCharacterDialogNotice('');
+  }
+
+  function handleCharacterDraftHexaChange(value: string) {
+    setCharacterDraftHexa(value.replace(/[^0-9]/g, ''));
+    setCharacterPreview(null);
+    setCharacterPreviewHexa(0);
+    setCharacterDialogNotice('');
+  }
+
+  async function previewCharacterRegistration(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!authUser) return openAuthDialog('login', '캐릭터 등록은 로그인 후 이용할 수 있습니다.');
+    if (!draftNickname) {
+      setCharacterDialogNotice('등록할 캐릭터 닉네임을 입력해 주세요.');
       return;
     }
-    if (!hexa) {
-      setNoticeKind('error');
-      setNotice('헥사환산을 입력한 뒤 캐릭터를 등록해 주세요.');
+    if (!draftHexa) {
+      setCharacterDialogNotice('등록할 캐릭터의 헥사환산을 입력해 주세요.');
+      return;
+    }
+    if (registeredCharacters.length >= MAX_REGISTERED_CHARACTERS && !registeredCharacters.some((character) => character.nickname === draftNickname)) {
+      setCharacterDialogNotice(`캐릭터는 최대 ${MAX_REGISTERED_CHARACTERS}개까지 등록할 수 있습니다.`);
+      return;
+    }
+    setCharacterPreviewLoading(true);
+    setCharacterDialogNotice('캐릭터 정보를 확인하고 있습니다.');
+    try {
+      const response = await fetch(`/api/character?nickname=${encodeURIComponent(draftNickname)}&refresh=1`, {
+        headers: apiKey ? { 'x-nexon-api-key': apiKey } : {},
+      });
+      const data = await response.json() as CharacterProfile & { error?: string; code?: string };
+      if (data.code === 'API_KEY_REQUIRED') {
+        setApiDialogOpen(true);
+        throw new Error('NEXON Open API 키를 연결한 뒤 다시 확인해 주세요.');
+      }
+      if (!response.ok) throw new Error(data.error ?? '캐릭터 정보를 불러오지 못했습니다.');
+      if (data.partialData) throw new Error('공식 API 일부 응답이 지연되었습니다. 잠시 후 다시 확인해 주세요.');
+      setCharacterPreview(data as CharacterProfile);
+      setCharacterPreviewHexa(draftHexa);
+      setCharacterDialogNotice(`${data.nickname} 캐릭터가 맞다면 등록을 확정해 주세요.`);
+    } catch (error) {
+      setCharacterPreview(null);
+      setCharacterPreviewHexa(0);
+      setCharacterDialogNotice(error instanceof Error ? error.message : '캐릭터 확인 중 오류가 발생했습니다.');
+    } finally {
+      setCharacterPreviewLoading(false);
+    }
+  }
+
+  async function confirmCharacterRegistration() {
+    if (!authUser) return openAuthDialog('login', '캐릭터 등록은 로그인 후 이용할 수 있습니다.');
+    if (!characterPreview) {
+      setCharacterDialogNotice('먼저 카드 확인으로 캐릭터를 조회해 주세요.');
+      return;
+    }
+    if (characterLimitReached) {
+      setCharacterDialogNotice(`캐릭터는 최대 ${MAX_REGISTERED_CHARACTERS}개까지 등록할 수 있습니다.`);
       return;
     }
     setCharactersSubmitting(true);
@@ -241,23 +319,26 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'save',
-          nickname: profile.nickname,
-          hexaStat: hexa,
-          characterClass: profile.characterClass,
-          characterLevel: profile.level,
-          characterImage: profile.image,
-          arcaneForce: profile.arcaneForce,
-          authenticForce: profile.authenticForce,
+          nickname: characterPreview.nickname,
+          hexaStat: characterPreviewHexa,
+          characterClass: characterPreview.characterClass,
+          characterLevel: characterPreview.level,
+          characterImage: characterPreview.image,
+          arcaneForce: characterPreview.arcaneForce,
+          authenticForce: characterPreview.authenticForce,
         }),
       });
       const data = await response.json() as RegisteredCharactersResponse;
       if (!response.ok) throw new Error(data.error ?? '캐릭터를 등록하지 못했습니다.');
       setRegisteredCharacters(data.characters ?? []);
+      setProfile(characterPreview);
+      setNickname(characterPreview.nickname);
+      setHexaInput(String(characterPreviewHexa));
       setNoticeKind('success');
-      setNotice(`${profile.nickname} 캐릭터를 상단 캐릭터 목록에 등록했습니다.`);
+      setNotice(`${characterPreview.nickname} 캐릭터를 상단 캐릭터 목록에 등록했습니다.`);
+      setCharacterDialogOpen(false);
     } catch (error) {
-      setNoticeKind('error');
-      setNotice(error instanceof Error ? error.message : '캐릭터를 등록하지 못했습니다.');
+      setCharacterDialogNotice(error instanceof Error ? error.message : '캐릭터를 등록하지 못했습니다.');
     } finally {
       setCharactersSubmitting(false);
     }
@@ -377,9 +458,9 @@ export default function Home() {
             </nav>
             <div className="flex items-center gap-2">
               {authUser && (
-                <div className="hidden max-w-[470px] items-center gap-1 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-1.5 py-1 xl:flex">
-                  <span className="px-1 text-[11px] font-bold text-[#687080]">캐릭터</span>
-                  <div className="flex max-w-[280px] gap-1 overflow-x-auto py-0.5">
+                <div className="hidden max-w-[610px] items-center gap-1.5 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-1.5 py-1 xl:flex">
+                  <span className="px-1 text-[11px] font-bold text-[#687080]">캐릭터 {registeredCharacters.length}/{MAX_REGISTERED_CHARACTERS}</span>
+                  <div className="flex max-w-[420px] gap-1 overflow-x-auto py-0.5">
                     {charactersLoading ? (
                       <span className="px-2 text-[11px] font-semibold text-[#858c97]">불러오는 중</span>
                     ) : registeredCharacters.length ? (
@@ -392,15 +473,12 @@ export default function Home() {
                               title={`${character.nickname} · 헥환 ${character.hexaStat.toLocaleString()}`}
                               aria-pressed={selected}
                               onClick={() => void handleUseRegisteredCharacter(character)}
-                              className={`flex h-9 max-w-32 items-center gap-1.5 rounded-md border py-1 pl-1 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#535b68] hover:border-[#b9c0ca]'}`}
+                              className={`flex h-9 w-[76px] items-center gap-1.5 rounded-md border py-1 pl-1 pr-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#535b68] hover:border-[#b9c0ca]'}`}
                             >
                               <span className="relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-full border border-[#d8dce2] bg-[#eef1f5]">
                                 {character.characterImage ? <Image unoptimized src={character.characterImage} alt="" width={64} height={64} className="size-12 max-w-none object-contain" /> : <CircleUserRound className="size-4 text-[#8a919d]" />}
                               </span>
-                              <span className="min-w-0">
-                                <strong className="block truncate text-[11px] leading-tight">{character.nickname}</strong>
-                                <span className="block truncate text-[10px] leading-tight opacity-75">{character.hexaStat.toLocaleString()}</span>
-                              </span>
+                              <strong className="min-w-0 truncate text-[11px] leading-tight">{character.nickname}</strong>
                             </button>
                             <button
                               type="button"
@@ -418,7 +496,7 @@ export default function Home() {
                       <span className="px-2 text-[11px] font-semibold text-[#858c97]">등록 없음</span>
                     )}
                   </div>
-                  <Button type="button" variant="outline" size="sm" disabled={charactersSubmitting || loading || !profileMatchesNickname} onClick={() => void saveCurrentCharacter()} className="h-8 shrink-0 rounded-md border-[#ccd1d9] px-2 text-xs">
+                  <Button type="button" variant="outline" size="sm" disabled={charactersSubmitting || loading} onClick={openCharacterDialog} className="h-8 shrink-0 rounded-md border-[#ccd1d9] px-2 text-xs">
                     <Plus className="size-3.5" />등록
                   </Button>
                 </div>
@@ -604,6 +682,86 @@ export default function Home() {
           )}
         </main>
       </div>
+      <Dialog open={characterDialogOpen} onOpenChange={setCharacterDialogOpen}>
+        <DialogContent className="rounded-lg sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><CircleUserRound className="size-4 text-[#eb5b35]" /> 캐릭터 등록</DialogTitle>
+            <DialogDescription>닉네임과 헥사환산을 확인한 뒤 내 캐릭터에 저장합니다.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={previewCharacterRegistration} className="space-y-4">
+            <div className="grid gap-2 sm:grid-cols-[1fr_150px_auto]">
+              <label htmlFor="register-character-name" className="sr-only">캐릭터 닉네임</label>
+              <Input
+                id="register-character-name"
+                value={characterDraftName}
+                onChange={(event) => handleCharacterDraftNameChange(event.target.value)}
+                className="h-10 rounded-md border-[#ccd1d9]"
+                placeholder="캐릭터 닉네임"
+              />
+              <label htmlFor="register-character-hexa" className="sr-only">헥사환산</label>
+              <Input
+                id="register-character-hexa"
+                inputMode="numeric"
+                value={characterDraftHexa ? Number(characterDraftHexa.replace(/,/g, '')).toLocaleString() : ''}
+                onChange={(event) => handleCharacterDraftHexaChange(event.target.value)}
+                className="h-10 rounded-md border-[#ccd1d9] tabular-nums"
+                placeholder="헥사환산"
+              />
+              <Button type="submit" disabled={characterPreviewLoading} variant="outline" className="h-10 rounded-md border-[#ccd1d9]">
+                <Search className="size-4" /> {characterPreviewLoading ? '확인 중' : '카드 확인'}
+              </Button>
+            </div>
+
+            {characterPreview ? (
+              <article className={`rounded-lg border p-4 ${characterLimitReached ? 'border-red-200 bg-red-50' : 'border-[#dfe2e8] bg-[#fafbfc]'}`}>
+                <div className="flex items-center gap-4">
+                  <div className="relative grid size-28 shrink-0 place-items-end overflow-hidden rounded-full border border-[#d8dce2] bg-[#eef1f5]">
+                    {characterPreview.image ? (
+                      <Image unoptimized src={characterPreview.image} alt={`${characterPreview.nickname} 캐릭터`} width={180} height={180} className="size-36 max-w-none object-contain" />
+                    ) : (
+                      <CircleUserRound className="m-auto size-10 text-[#8a919d]" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-xl font-bold text-[#171a21]">{characterPreview.nickname}</h2>
+                      <Badge variant="outline" className="rounded-sm border-amber-200 bg-amber-50 text-amber-700">
+                        {previewIsExistingCharacter ? '업데이트' : '새 등록'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-[#687080]">{characterPreview.characterClass} · Lv.{characterPreview.level}</p>
+                    <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-md bg-white px-3 py-2 ring-1 ring-[#e1e5eb]">
+                        <dt className="text-[11px] font-semibold text-[#7a818d]">헥사환산</dt>
+                        <dd className="mt-0.5 font-bold tabular-nums">{characterPreviewHexa.toLocaleString()}</dd>
+                      </div>
+                      <div className="rounded-md bg-white px-3 py-2 ring-1 ring-[#e1e5eb]">
+                        <dt className="text-[11px] font-semibold text-[#7a818d]">포스</dt>
+                        <dd className="mt-0.5 font-bold tabular-nums">{characterPreview.arcaneForce.toLocaleString()} / {characterPreview.authenticForce.toLocaleString()}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </article>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#d7dbe2] bg-[#fafbfc] px-4 py-5 text-center text-sm font-medium text-[#737b87]">
+                등록할 캐릭터 카드를 먼저 확인해 주세요.
+              </div>
+            )}
+
+            <p className={`min-h-8 rounded-md px-3 py-2 text-xs ${characterDialogNotice ? characterLimitReached ? 'border border-red-200 bg-red-50 text-red-700' : 'border border-amber-200 bg-amber-50 text-amber-800' : 'bg-[#fafbfc] text-[#737b87]'}`} aria-live="polite">
+              {characterDialogNotice || `내 캐릭터는 최대 ${MAX_REGISTERED_CHARACTERS}개까지 등록할 수 있습니다.`}
+            </p>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCharacterDialogOpen(false)} className="rounded-md">취소</Button>
+              <Button type="button" disabled={!characterPreview || charactersSubmitting || characterLimitReached} onClick={() => void confirmCharacterRegistration()} className="rounded-md bg-[#eb5b35] hover:bg-[#d94d2a]">
+                {charactersSubmitting ? '등록 중' : '이 캐릭터 등록'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={apiDialogOpen} onOpenChange={setApiDialogOpen}>
         <DialogContent className="rounded-lg sm:max-w-md">
           <DialogHeader>
