@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Calculator, CircleHelp, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, LogIn, LogOut, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound } from 'lucide-react';
+import { Activity, Calculator, CircleHelp, CircleUserRound, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, LogIn, LogOut, Plus, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -11,7 +11,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PartyBoard } from '@/components/party-board';
 import type { AuthResponse, AuthUser } from '@/lib/auth';
-import type { RegisteredCharacter } from '@/lib/characters';
+import type { RegisteredCharacter, RegisteredCharactersResponse } from '@/lib/characters';
 import { BOSS_TABLE_VERSION, calculateBosses, calculateEngineSummary, CharacterProfile, ENGINE_VERSION, formatRate, REFERENCE_HEXA, REFERENCE_PROFILE } from '@/lib/model';
 
 type Filter = 'range' | 'all' | 'solo';
@@ -52,6 +52,13 @@ function selectedPresets(profile: CharacterProfile) {
   return labels.filter((item) => item[1] != null).map(([label, value]) => `${label} ${value}`).join(' · ');
 }
 
+async function fetchRegisteredCharacters(signal?: AbortSignal) {
+  const response = await fetch('/api/my-characters', { cache: 'no-store', credentials: 'same-origin', signal });
+  const data = await response.json() as RegisteredCharactersResponse;
+  if (!response.ok) throw new Error(data.error ?? '내 캐릭터를 불러오지 못했습니다.');
+  return data.characters ?? [];
+}
+
 function statusClass(key: string) {
   if (key === 'impossible') return 'bg-red-50 text-red-700 ring-red-200';
   if (key === 'party-min') return 'bg-violet-50 text-violet-700 ring-violet-200';
@@ -79,6 +86,9 @@ export default function Home() {
   const [authLoginName, setAuthLoginName] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authNotice, setAuthNotice] = useState('');
+  const [registeredCharacters, setRegisteredCharacters] = useState<RegisteredCharacter[]>([]);
+  const [charactersLoading, setCharactersLoading] = useState(false);
+  const [charactersSubmitting, setCharactersSubmitting] = useState(false);
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const requestSequence = useRef(0);
@@ -105,6 +115,27 @@ export default function Home() {
       requestController.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setRegisteredCharacters([]);
+      return;
+    }
+    const controller = new AbortController();
+    setCharactersLoading(true);
+    fetchRegisteredCharacters(controller.signal)
+      .then((items) => setRegisteredCharacters(items))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setNoticeKind('error');
+          setNotice(error instanceof Error ? error.message : '내 캐릭터를 불러오지 못했습니다.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCharactersLoading(false);
+      });
+    return () => controller.abort();
+  }, [authUser]);
 
   const hexa = Math.max(0, Number(hexaInput.replace(/,/g, '')) || 0);
   const exactAnchor = hexa === REFERENCE_HEXA && profile.source === 'reference';
@@ -188,6 +219,71 @@ export default function Home() {
     setNoticeKind('info');
     setNotice(`${character.nickname} 등록 캐릭터를 불러와 최신 정보를 조회합니다.`);
     await loadCharacter(apiKey, { nickname: character.nickname, hexaInput: nextHexa });
+  }
+
+  async function saveCurrentCharacter() {
+    if (!authUser) return openAuthDialog('login', '캐릭터 등록은 로그인 후 이용할 수 있습니다.');
+    if (!profileMatchesNickname) {
+      setNoticeKind('error');
+      setNotice('현재 닉네임을 먼저 조회한 뒤 캐릭터를 등록해 주세요.');
+      return;
+    }
+    if (!hexa) {
+      setNoticeKind('error');
+      setNotice('헥사환산을 입력한 뒤 캐릭터를 등록해 주세요.');
+      return;
+    }
+    setCharactersSubmitting(true);
+    try {
+      const response = await fetch('/api/my-characters', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save',
+          nickname: profile.nickname,
+          hexaStat: hexa,
+          characterClass: profile.characterClass,
+          characterLevel: profile.level,
+          characterImage: profile.image,
+          arcaneForce: profile.arcaneForce,
+          authenticForce: profile.authenticForce,
+        }),
+      });
+      const data = await response.json() as RegisteredCharactersResponse;
+      if (!response.ok) throw new Error(data.error ?? '캐릭터를 등록하지 못했습니다.');
+      setRegisteredCharacters(data.characters ?? []);
+      setNoticeKind('success');
+      setNotice(`${profile.nickname} 캐릭터를 상단 캐릭터 목록에 등록했습니다.`);
+    } catch (error) {
+      setNoticeKind('error');
+      setNotice(error instanceof Error ? error.message : '캐릭터를 등록하지 못했습니다.');
+    } finally {
+      setCharactersSubmitting(false);
+    }
+  }
+
+  async function deleteRegisteredCharacter(character: RegisteredCharacter) {
+    if (!window.confirm(`${character.nickname} 캐릭터 등록을 삭제할까요?`)) return;
+    setCharactersSubmitting(true);
+    try {
+      const response = await fetch('/api/my-characters', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', characterId: character.id }),
+      });
+      const data = await response.json() as RegisteredCharactersResponse;
+      if (!response.ok) throw new Error(data.error ?? '캐릭터 등록을 삭제하지 못했습니다.');
+      setRegisteredCharacters(data.characters ?? []);
+      setNoticeKind('info');
+      setNotice(`${character.nickname} 캐릭터 등록을 삭제했습니다.`);
+    } catch (error) {
+      setNoticeKind('error');
+      setNotice(error instanceof Error ? error.message : '캐릭터 등록을 삭제하지 못했습니다.');
+    } finally {
+      setCharactersSubmitting(false);
+    }
   }
 
   async function handleApiKeySave(event: SyntheticEvent<HTMLFormElement>) {
@@ -280,6 +376,53 @@ export default function Home() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-7 rounded-sm px-3 text-xs ${view === 'calculator' ? 'bg-white font-bold shadow-sm hover:bg-white' : 'text-[#687080]'}`}>보스 배율</Button>
             </nav>
             <div className="flex items-center gap-2">
+              {authUser && (
+                <div className="hidden max-w-[470px] items-center gap-1 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-1.5 py-1 xl:flex">
+                  <span className="px-1 text-[11px] font-bold text-[#687080]">캐릭터</span>
+                  <div className="flex max-w-[280px] gap-1 overflow-x-auto py-0.5">
+                    {charactersLoading ? (
+                      <span className="px-2 text-[11px] font-semibold text-[#858c97]">불러오는 중</span>
+                    ) : registeredCharacters.length ? (
+                      registeredCharacters.map((character) => {
+                        const selected = profileMatchesNickname && character.nickname === profile.nickname && character.hexaStat === hexa;
+                        return (
+                          <span key={character.id} className="relative shrink-0">
+                            <button
+                              type="button"
+                              title={`${character.nickname} · 헥환 ${character.hexaStat.toLocaleString()}`}
+                              aria-pressed={selected}
+                              onClick={() => void handleUseRegisteredCharacter(character)}
+                              className={`flex h-9 max-w-32 items-center gap-1.5 rounded-md border py-1 pl-1 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30 ${selected ? 'border-[#eb5b35] bg-[#fff1ec] text-[#c74928]' : 'border-[#d7dbe2] bg-white text-[#535b68] hover:border-[#b9c0ca]'}`}
+                            >
+                              <span className="relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-full border border-[#d8dce2] bg-[#eef1f5]">
+                                {character.characterImage ? <Image unoptimized src={character.characterImage} alt="" width={64} height={64} className="size-12 max-w-none object-contain" /> : <CircleUserRound className="size-4 text-[#8a919d]" />}
+                              </span>
+                              <span className="min-w-0">
+                                <strong className="block truncate text-[11px] leading-tight">{character.nickname}</strong>
+                                <span className="block truncate text-[10px] leading-tight opacity-75">{character.hexaStat.toLocaleString()}</span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={charactersSubmitting}
+                              aria-label={`${character.nickname} 등록 삭제`}
+                              onClick={() => void deleteRegisteredCharacter(character)}
+                              className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full border border-white bg-[#9aa1ad] text-white shadow-sm hover:bg-[#c74928] disabled:opacity-50"
+                            >
+                              <X className="size-2.5" />
+                            </button>
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="px-2 text-[11px] font-semibold text-[#858c97]">등록 없음</span>
+                    )}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={charactersSubmitting || loading || !profileMatchesNickname} onClick={() => void saveCurrentCharacter()} className="h-8 shrink-0 rounded-md border-[#ccd1d9] px-2 text-xs">
+                    <Plus className="size-3.5" />등록
+                  </Button>
+                </div>
+              )}
               {authUser ? (
                 <>
                   <Badge variant="outline" className="h-8 max-w-40 gap-1.5 truncate rounded-md border-[#dfe2e8] bg-[#fafbfc] px-2.5 text-[#535b68]">
@@ -327,7 +470,6 @@ export default function Home() {
               onNicknameChange={handleNicknameChange}
               onHexaChange={setHexaInput}
               onLookup={() => loadCharacter()}
-              onUseRegisteredCharacter={handleUseRegisteredCharacter}
               onOpenCalculator={() => setView('calculator')}
               onRequireAuth={(message) => openAuthDialog('login', message)}
             />

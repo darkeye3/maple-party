@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Copy, Crown, LayoutGrid, LinkIcon, LogIn, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users, X } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, CircleUserRound, Coins, Copy, Crown, LayoutGrid, LinkIcon, LogIn, LogOut, Plus, RefreshCw, ShieldCheck, Swords, Target, Trash2, UserRoundCheck, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -13,7 +13,6 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Toggle } from '@/components/ui/toggle';
 import type { AuthUser } from '@/lib/auth';
-import type { RegisteredCharacter, RegisteredCharactersResponse } from '@/lib/characters';
 import type { BossResult, CharacterProfile } from '@/lib/model';
 import type { CombatRole, PartyActionResponse, PartyPost, RewardPreset } from '@/lib/parties';
 import { cn } from '@/lib/utils';
@@ -97,7 +96,6 @@ type PartyBoardProps = {
   onNicknameChange: (value: string) => void;
   onHexaChange: (value: string) => void;
   onLookup: () => Promise<void>;
-  onUseRegisteredCharacter: (character: RegisteredCharacter) => Promise<void>;
   onOpenCalculator: () => void;
   onRequireAuth: (message: string) => void;
 };
@@ -198,13 +196,6 @@ async function fetchPartyList(signal?: AbortSignal) {
   return data.parties ?? [];
 }
 
-async function fetchRegisteredCharacters(signal?: AbortSignal) {
-  const response = await fetch('/api/my-characters', { cache: 'no-store', credentials: 'same-origin', signal });
-  const data = await response.json() as RegisteredCharactersResponse;
-  if (!response.ok) throw new Error(data.error ?? '내 캐릭터를 불러오지 못했습니다.');
-  return data.characters ?? [];
-}
-
 export function PartyBoard({
   profile,
   nickname,
@@ -218,7 +209,6 @@ export function PartyBoard({
   onNicknameChange,
   onHexaChange,
   onLookup,
-  onUseRegisteredCharacter,
   onOpenCalculator,
   onRequireAuth,
 }: PartyBoardProps) {
@@ -239,9 +229,6 @@ export function PartyBoard({
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<PartyPost | null>(null);
   const directPartyCodeRef = useRef<string | null>(null);
-  const [registeredCharacters, setRegisteredCharacters] = useState<RegisteredCharacter[]>([]);
-  const [charactersLoading, setCharactersLoading] = useState(false);
-  const [charactersSubmitting, setCharactersSubmitting] = useState(false);
   const [bossName, setBossName] = useState(bossNames[0] ?? '');
   const difficultyOptions = useMemo(() => (
     partyBosses
@@ -305,24 +292,6 @@ export function PartyBoard({
       });
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    if (!authUser) {
-      setRegisteredCharacters([]);
-      return;
-    }
-    const controller = new AbortController();
-    setCharactersLoading(true);
-    fetchRegisteredCharacters(controller.signal)
-      .then((items) => setRegisteredCharacters(items))
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : '내 캐릭터를 불러오지 못했습니다.');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCharactersLoading(false);
-      });
-    return () => controller.abort();
-  }, [authUser]);
 
   useEffect(() => {
     if (!profileMatchesNickname || !profile.image) return;
@@ -579,67 +548,6 @@ export function PartyBoard({
     setCreateOpen(true);
   }
 
-  async function saveCurrentCharacter() {
-    if (!authUser) return onRequireAuth('캐릭터 등록은 로그인 후 이용할 수 있습니다.');
-    if (!profileMatchesNickname) {
-      setNotice('현재 닉네임을 먼저 조회한 뒤 캐릭터를 등록해 주세요.');
-      return;
-    }
-    if (!hexaStat) {
-      setNotice('헥사환산을 입력한 뒤 캐릭터를 등록해 주세요.');
-      return;
-    }
-    setCharactersSubmitting(true);
-    setNotice('');
-    try {
-      const response = await fetch('/api/my-characters', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'save',
-          nickname: profile.nickname,
-          hexaStat,
-          characterClass: profile.characterClass,
-          characterLevel: profile.level,
-          characterImage: profile.image,
-          arcaneForce: profile.arcaneForce,
-          authenticForce: profile.authenticForce,
-        }),
-      });
-      const data = await response.json() as RegisteredCharactersResponse;
-      if (!response.ok) throw new Error(data.error ?? '캐릭터를 등록하지 못했습니다.');
-      setRegisteredCharacters(data.characters ?? []);
-      setNotice(`${profile.nickname} 캐릭터를 내 계정에 등록했습니다.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '캐릭터를 등록하지 못했습니다.');
-    } finally {
-      setCharactersSubmitting(false);
-    }
-  }
-
-  async function deleteRegisteredCharacter(character: RegisteredCharacter) {
-    if (!window.confirm(`${character.nickname} 캐릭터 등록을 삭제할까요?`)) return;
-    setCharactersSubmitting(true);
-    setNotice('');
-    try {
-      const response = await fetch('/api/my-characters', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', characterId: character.id }),
-      });
-      const data = await response.json() as RegisteredCharactersResponse;
-      if (!response.ok) throw new Error(data.error ?? '캐릭터 등록을 삭제하지 못했습니다.');
-      setRegisteredCharacters(data.characters ?? []);
-      setNotice(`${character.nickname} 캐릭터 등록을 삭제했습니다.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '캐릭터 등록을 삭제하지 못했습니다.');
-    } finally {
-      setCharactersSubmitting(false);
-    }
-  }
-
   function setPartyAddress(party?: PartyPost) {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
@@ -757,45 +665,6 @@ export function PartyBoard({
               <Button type="button" variant="ghost" size="sm" onClick={onOpenCalculator} className="h-6 px-2 text-xs">전체 배율 보기</Button>
             </div>
           </div>
-          {authUser && (
-            <section className="mt-3 rounded-md border border-[#dfe2e8] bg-white px-3 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-xs font-bold text-[#343a44]">내 캐릭터</h2>
-                  <p className="mt-0.5 text-[11px] text-[#858c97]">조회한 닉네임과 헥환을 계정에 저장해 파티 신청 때 다시 불러옵니다.</p>
-                </div>
-                <Button type="button" variant="outline" size="sm" disabled={charactersSubmitting || characterLoading || !profileMatchesNickname} onClick={() => void saveCurrentCharacter()} className="h-8 rounded-md border-[#ccd1d9] text-xs">
-                  <Plus className="size-3.5" />{charactersSubmitting ? '저장 중' : '현재 캐릭터 등록'}
-                </Button>
-              </div>
-              {charactersLoading ? (
-                <p className="mt-2 rounded-md bg-[#fafbfc] px-3 py-2 text-xs text-[#737b87]">내 캐릭터를 불러오는 중입니다.</p>
-              ) : registeredCharacters.length ? (
-                <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1">
-                  {registeredCharacters.map((character) => {
-                    const selected = profileMatchesNickname && character.nickname === profile.nickname && character.hexaStat === hexaStat;
-                    return (
-                      <article key={character.id} className={`relative flex min-w-[210px] items-center gap-2 rounded-md border bg-[#fafbfc] p-2 ${selected ? 'border-[#eb5b35] ring-2 ring-[#eb5b35]/15' : 'border-[#dfe2e8]'}`}>
-                        <button type="button" onClick={() => void onUseRegisteredCharacter(character)} className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#eb5b35]/30">
-                          <span className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-full border border-[#d8dce2] bg-[#f3f5f7]">
-                            {character.characterImage ? <Image unoptimized src={character.characterImage} alt="" width={96} height={96} className="size-20 max-w-none object-contain" /> : <CircleUserRound className="size-6 text-[#8a919d]" />}
-                          </span>
-                          <span className="min-w-0">
-                            <strong className="block truncate text-xs text-[#20242c]">{character.nickname}</strong>
-                            <span className="mt-0.5 block truncate text-[11px] text-[#737b87]">{character.characterClass} · Lv.{character.characterLevel}</span>
-                            <span className="mt-0.5 block text-[11px] font-bold tabular-nums text-[#1f5ed5]">헥환 {character.hexaStat.toLocaleString()}</span>
-                          </span>
-                        </button>
-                        <Button type="button" variant="ghost" size="sm" disabled={charactersSubmitting} aria-label={`${character.nickname} 등록 삭제`} onClick={() => void deleteRegisteredCharacter(character)} className="absolute right-1 top-1 size-6 rounded-full p-0 text-[#858c97] hover:bg-white hover:text-[#c74928]"><X className="size-3.5" /></Button>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="mt-2 rounded-md bg-[#fafbfc] px-3 py-2 text-xs text-[#737b87]">아직 등록된 캐릭터가 없습니다. 닉네임을 조회한 뒤 현재 캐릭터 등록을 눌러 주세요.</p>
-              )}
-            </section>
-          )}
           {notice && <p className="mt-2 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-3 py-2 text-xs font-medium text-[#535b68]" aria-live="polite">{notice}</p>}
         </div>
       </section>
