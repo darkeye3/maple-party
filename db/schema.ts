@@ -38,6 +38,7 @@ export const createPartyMembersTable = `
     character_image TEXT,
     hexa_stat INTEGER NOT NULL,
     verified_rate REAL NOT NULL,
+    verified_rate_version INTEGER NOT NULL DEFAULT 1,
     role TEXT NOT NULL CHECK (role IN ('leader', 'member')),
     combat_role TEXT,
     terms_version_agreed INTEGER,

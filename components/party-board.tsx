@@ -745,7 +745,7 @@ export function PartyBoard({
               const eligible = profileMatchesNickname && availableRoleForRate(party, myRate);
               const roleContract = isRoleContract(party);
               const targetRate = party.requiredPartyRate ?? 0;
-              const readiness = targetRate > 0 ? Math.min(999, party.totalRate / targetRate * 100) : 0;
+              const readiness = !party.ratesPending && targetRate > 0 ? Math.min(999, party.totalRate / targetRate * 100) : null;
               return (
                 <article key={party.id} className="rounded-lg border border-[#dfe2e8] bg-white p-4">
                   <div className="flex items-start gap-3">
@@ -760,7 +760,7 @@ export function PartyBoard({
                   </div>
                   <div className="mt-4 grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
                     <div><p className="text-[10px] text-[#818894]">{roleContract ? '목표 배율' : '최소 배율'}</p><p className="mt-0.5 text-sm font-bold tabular-nums">{rateLabel(roleContract ? targetRate : party.minimumRate)}</p></div>
-                    <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums text-[#1f5ed5]">{rateLabel(party.totalRate)}</p>{roleContract && <p className="mt-0.5 text-[9px] text-[#818894]">준비도 {readiness.toFixed(0)}%</p>}</div>
+                    <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold tabular-nums text-[#1f5ed5]">{party.ratesPending ? '재검증 중' : rateLabel(party.totalRate)}</p>{roleContract && <p className="mt-0.5 text-[9px] text-[#818894]">{readiness == null ? '계산 모델 갱신' : `준비도 ${readiness.toFixed(0)}%`}</p>}</div>
                     <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold tabular-nums">{party.members.length}/{party.capacity}</p></div>
                     <div><p className="text-[10px] text-[#818894]">내 배율</p><p className={`mt-0.5 text-sm font-bold tabular-nums ${eligible ? 'text-emerald-700' : 'text-[#687080]'}`}>{profileMatchesNickname && myRate != null ? rateLabel(myRate) : '-'}</p></div>
                   </div>
@@ -934,9 +934,9 @@ export function PartyBoard({
             </div>
             <div className="grid grid-cols-4 divide-x divide-[#e3e6eb] border-y border-[#e3e6eb] py-3 text-center">
               <div><p className="text-[10px] text-[#818894]">현재 인원</p><p className="mt-0.5 text-sm font-bold">{selectedParty.members.length}/{selectedParty.capacity}</p></div>
-              <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold text-[#1f5ed5]">{rateLabel(selectedParty.totalRate)}</p></div>
+              <div><p className="text-[10px] text-[#818894]">파티 배율</p><p className="mt-0.5 text-sm font-bold text-[#1f5ed5]">{selectedParty.ratesPending ? '재검증 중' : rateLabel(selectedParty.totalRate)}</p></div>
               <div><p className="text-[10px] text-[#818894]">{isRoleContract(selectedParty) ? '목표 배율' : '내 배율'}</p><p className="mt-0.5 text-sm font-bold">{isRoleContract(selectedParty) ? rateLabel(selectedParty.requiredPartyRate ?? 0) : selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
-              <div><p className="text-[10px] text-[#818894]">{isRoleContract(selectedParty) ? '준비도' : '남은 자리'}</p><p className="mt-0.5 text-sm font-bold">{isRoleContract(selectedParty) ? `${Math.min(999, selectedParty.totalRate / (selectedParty.requiredPartyRate || 1) * 100).toFixed(0)}%` : `${Math.max(0, selectedParty.capacity - selectedParty.members.length)}명`}</p></div>
+              <div><p className="text-[10px] text-[#818894]">{isRoleContract(selectedParty) ? '준비도' : '남은 자리'}</p><p className="mt-0.5 text-sm font-bold">{isRoleContract(selectedParty) ? selectedParty.ratesPending ? '-' : `${Math.min(999, selectedParty.totalRate / (selectedParty.requiredPartyRate || 1) * 100).toFixed(0)}%` : `${Math.max(0, selectedParty.capacity - selectedParty.members.length)}명`}</p></div>
             </div>
             {isRoleContract(selectedParty) && <section className="space-y-2">
               <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-[#535b68]">가입 역할</p><p className="text-[11px] text-[#818894]">내 배율 {selectedMyRate == null ? '-' : rateLabel(selectedMyRate)}</p></div>
@@ -970,7 +970,7 @@ export function PartyBoard({
                       <p className="mt-1 text-xs text-[#747b88]">{member.characterClass} · Lv.{member.characterLevel}</p>
                       <div className="mt-2 space-y-1 border-t border-[#eceef1] pt-2 text-[11px]">
                         <div className="flex items-center justify-between gap-3"><span className="text-[#818894]">헥환</span><strong className="tabular-nums">{member.hexaStat.toLocaleString()}</strong></div>
-                        <div className="flex items-center justify-between gap-3"><span className="text-[#818894]">보스 배율</span><strong className="tabular-nums text-[#1f5ed5]">{rateLabel(member.verifiedRate)}</strong></div>
+                        <div className="flex items-center justify-between gap-3"><span className="text-[#818894]">보스 배율</span><strong className="tabular-nums text-[#1f5ed5]">{member.rateVerified ? rateLabel(member.verifiedRate) : '재검증 필요'}</strong></div>
                       </div>
                     </div>
                   </article>;

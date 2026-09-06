@@ -75,6 +75,7 @@ export async function ensurePartySchema() {
         ['combat_role', 'ALTER TABLE party_members ADD COLUMN combat_role TEXT'],
         ['terms_version_agreed', 'ALTER TABLE party_members ADD COLUMN terms_version_agreed INTEGER'],
         ['terms_agreed_at', 'ALTER TABLE party_members ADD COLUMN terms_agreed_at TEXT'],
+        ['verified_rate_version', 'ALTER TABLE party_members ADD COLUMN verified_rate_version INTEGER NOT NULL DEFAULT 1'],
       ] as const;
       for (const [name, sql] of memberColumnMigrations) {
         if (!memberColumnNames.has(name)) await database.prepare(sql).run();

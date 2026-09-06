@@ -76,6 +76,25 @@ export class PartyService {
   ) {}
 
   async listParties() {
+    const staleMembers = await this.repository.listStaleActiveMembers();
+    for (const member of staleMembers) {
+      try {
+        const verified = await this.verifyCharacter(member.nickname, member.hexaStat, member.bossId);
+        await this.repository.updateMemberVerification({
+          ...member,
+          characterClass: verified.profile.characterClass,
+          characterLevel: verified.profile.level,
+          characterImage: verified.profile.image,
+          verifiedRate: verified.rate,
+        });
+      } catch (error) {
+        console.warn('Party rate revalidation failed', {
+          bossId: member.bossId,
+          memberId: member.memberId,
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
     return this.repository.listActiveParties();
   }
 

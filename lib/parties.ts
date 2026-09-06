@@ -10,6 +10,7 @@ export type PartyMember = {
   characterImage?: string;
   hexaStat: number;
   verifiedRate: number;
+  rateVerified: boolean;
   role: 'leader' | 'member';
   combatRole?: CombatRole;
   isCurrentUser?: boolean;
@@ -43,6 +44,7 @@ export type PartyPost = {
   status: 'open' | 'full' | 'cancelled';
   createdAt: string;
   totalRate: number;
+  ratesPending: boolean;
   members: PartyMember[];
 };
 

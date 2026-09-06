@@ -1,4 +1,5 @@
 import type { CombatRole, PartyMember, PartyPost, RewardPreset } from '@/lib/parties';
+import { PARTY_RATE_MODEL_VERSION } from '@/lib/party-rate-model';
 
 type PartyRow = {
   id: string;
@@ -27,6 +28,7 @@ type PartyRow = {
   created_at: string;
   member_count: number;
   total_rate: number;
+  stale_rate_count: number;
 };
 
 type MemberRow = {
@@ -39,11 +41,28 @@ type MemberRow = {
   character_image: string | null;
   hexa_stat: number;
   verified_rate: number;
+  verified_rate_version: number;
   role: 'leader' | 'member';
   combat_role: CombatRole | null;
   terms_version_agreed: number | null;
   terms_agreed_at: string | null;
   joined_at: string;
+};
+
+export type StalePartyMember = {
+  bossId: string;
+  hexaStat: number;
+  memberId: string;
+  nickname: string;
+  partyId: string;
+  role: 'leader' | 'member';
+};
+
+export type RefreshedPartyMember = StalePartyMember & {
+  characterClass: string;
+  characterImage?: string;
+  characterLevel: number;
+  verifiedRate: number;
 };
 
 export type CreatePartyRecord = {
@@ -89,7 +108,7 @@ export type AddPartyMemberRecord = {
   verifiedRate: number;
 };
 
-function memberFromRow(row: MemberRow, currentUserId?: string | null): PartyMember {
+function memberFromRow(row: MemberRow, rateModelVersion: number, currentUserId?: string | null): PartyMember {
   return {
     id: row.id,
     nickname: row.nickname,
@@ -98,6 +117,7 @@ function memberFromRow(row: MemberRow, currentUserId?: string | null): PartyMemb
     characterImage: row.character_image ?? undefined,
     hexaStat: row.hexa_stat,
     verifiedRate: row.verified_rate,
+    rateVerified: row.verified_rate_version === rateModelVersion,
     role: row.role,
     combatRole: row.combat_role ?? undefined,
     isCurrentUser: Boolean(currentUserId && row.user_id === currentUserId),
@@ -133,6 +153,7 @@ function partyFromRow(row: PartyRow, members: PartyMember[]): PartyPost {
     status: row.member_count >= row.capacity ? 'full' : row.status,
     createdAt: row.created_at,
     totalRate: row.total_rate,
+    ratesPending: row.stale_rate_count > 0,
     members,
   };
 }
@@ -141,6 +162,7 @@ export class PartyRepository {
   constructor(
     private readonly database: D1Database,
     private readonly currentUserId?: string | null,
+    private readonly rateModelVersion = PARTY_RATE_MODEL_VERSION,
   ) {}
 
   async listActiveParties(nowIso = new Date().toISOString()) {
@@ -162,6 +184,61 @@ export class PartyRepository {
           WHERE departure_at > ? AND status != 'cancelled'
         )
     `).bind(characterImage, nickname, nowIso).run();
+  }
+
+  async listStaleActiveMembers(nowIso = new Date().toISOString(), limit = 12) {
+    const { results } = await this.database.prepare(`
+      SELECT m.id AS member_id, m.party_id, m.nickname, m.hexa_stat, m.role, p.boss_id
+      FROM party_members m
+      JOIN parties p ON p.id = m.party_id
+      WHERE p.departure_at > ?
+        AND p.status != 'cancelled'
+        AND COALESCE(m.verified_rate_version, 1) != ?
+      ORDER BY m.joined_at ASC
+      LIMIT ?
+    `).bind(nowIso, this.rateModelVersion, limit).all<{
+      boss_id: string;
+      hexa_stat: number;
+      member_id: string;
+      nickname: string;
+      party_id: string;
+      role: 'leader' | 'member';
+    }>();
+    return results.map((row): StalePartyMember => ({
+      bossId: row.boss_id,
+      hexaStat: row.hexa_stat,
+      memberId: row.member_id,
+      nickname: row.nickname,
+      partyId: row.party_id,
+      role: row.role,
+    }));
+  }
+
+  async updateMemberVerification(record: RefreshedPartyMember) {
+    const statements = [
+      this.database.prepare(`
+        UPDATE party_members
+        SET character_class = ?, character_level = ?, character_image = ?,
+            verified_rate = ?, verified_rate_version = ?
+        WHERE id = ? AND party_id = ?
+      `).bind(
+        record.characterClass,
+        record.characterLevel,
+        record.characterImage ?? null,
+        record.verifiedRate,
+        this.rateModelVersion,
+        record.memberId,
+        record.partyId,
+      ),
+    ];
+    if (record.role === 'leader') {
+      statements.push(this.database.prepare(`
+        UPDATE parties
+        SET leader_rate = ?
+        WHERE id = ?
+      `).bind(record.verifiedRate, record.partyId));
+    }
+    await this.database.batch(statements);
   }
 
   async createPartyWithLeader(record: CreatePartyRecord) {
@@ -199,9 +276,9 @@ export class PartyRepository {
       this.database.prepare(`
         INSERT INTO party_members (
           id, party_id, user_id, nickname, character_class, character_level,
-          character_image, hexa_stat, verified_rate, role, combat_role,
+          character_image, hexa_stat, verified_rate, verified_rate_version, role, combat_role,
           terms_version_agreed, terms_agreed_at, joined_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'leader', ?, ?, ?, ?)
       `).bind(
         record.memberId,
         record.partyId,
@@ -212,6 +289,7 @@ export class PartyRepository {
         record.leaderCharacterImage ?? null,
         record.leaderHexa,
         record.leaderRate,
+        this.rateModelVersion,
         record.leaderCombatRole ?? null,
         record.formatVersion === 'role_contract_v2' ? 1 : null,
         record.formatVersion === 'role_contract_v2' ? record.createdAt : null,
@@ -278,20 +356,24 @@ export class PartyRepository {
   private async loadParties({ partyId, nowIso = new Date().toISOString() }: { partyId?: string; nowIso?: string }) {
     const partyQuery = partyId
       ? this.database.prepare(`
-          SELECT p.*, COUNT(m.id) AS member_count, COALESCE(SUM(m.verified_rate), 0) AS total_rate
+          SELECT p.*, COUNT(m.id) AS member_count,
+            COALESCE(SUM(CASE WHEN m.verified_rate_version = ? THEN m.verified_rate ELSE 0 END), 0) AS total_rate,
+            COALESCE(SUM(CASE WHEN m.verified_rate_version != ? THEN 1 ELSE 0 END), 0) AS stale_rate_count
           FROM parties p
           LEFT JOIN party_members m ON m.party_id = p.id
           WHERE p.id = ?
           GROUP BY p.id
-        `).bind(partyId)
+        `).bind(this.rateModelVersion, this.rateModelVersion, partyId)
       : this.database.prepare(`
-          SELECT p.*, COUNT(m.id) AS member_count, COALESCE(SUM(m.verified_rate), 0) AS total_rate
+          SELECT p.*, COUNT(m.id) AS member_count,
+            COALESCE(SUM(CASE WHEN m.verified_rate_version = ? THEN m.verified_rate ELSE 0 END), 0) AS total_rate,
+            COALESCE(SUM(CASE WHEN m.verified_rate_version != ? THEN 1 ELSE 0 END), 0) AS stale_rate_count
           FROM parties p
           LEFT JOIN party_members m ON m.party_id = p.id
           WHERE p.departure_at > ? AND p.status != 'cancelled'
           GROUP BY p.id
           ORDER BY p.departure_at ASC, p.created_at DESC
-        `).bind(nowIso);
+        `).bind(this.rateModelVersion, this.rateModelVersion, nowIso);
     const { results: partyRows } = await partyQuery.all<PartyRow>();
     if (!partyRows.length) return [];
 
@@ -313,7 +395,7 @@ export class PartyRepository {
     const membersByParty = new Map<string, PartyMember[]>();
     for (const row of memberRows) {
       const members = membersByParty.get(row.party_id) ?? [];
-      members.push(memberFromRow(row, this.currentUserId));
+      members.push(memberFromRow(row, this.rateModelVersion, this.currentUserId));
       membersByParty.set(row.party_id, members);
     }
 
@@ -327,10 +409,10 @@ export class PartyRepository {
     return this.database.prepare(`
       INSERT INTO party_members (
         id, party_id, user_id, nickname, character_class, character_level,
-        character_image, hexa_stat, verified_rate, role, combat_role,
+        character_image, hexa_stat, verified_rate, verified_rate_version, role, combat_role,
         terms_version_agreed, terms_agreed_at, joined_at
       )
-      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?
+      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?
       FROM parties p
       WHERE p.id = ?
         AND p.status = 'open'
@@ -352,6 +434,7 @@ export class PartyRepository {
       record.characterImage ?? null,
       record.hexaStat,
       record.verifiedRate,
+      this.rateModelVersion,
       combatRole,
       record.termsVersion,
       record.joinedAt,
@@ -368,9 +451,9 @@ export class PartyRepository {
     return this.database.prepare(`
       INSERT INTO party_members (
         id, party_id, user_id, nickname, character_class, character_level,
-        character_image, hexa_stat, verified_rate, role, joined_at
+        character_image, hexa_stat, verified_rate, verified_rate_version, role, joined_at
       )
-      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, 'member', ?
+      SELECT ?, p.id, ?, ?, ?, ?, ?, ?, ?, ?, 'member', ?
       FROM parties p
       WHERE p.id = ?
         AND p.status = 'open'
@@ -386,6 +469,7 @@ export class PartyRepository {
       record.characterImage ?? null,
       record.hexaStat,
       record.verifiedRate,
+      this.rateModelVersion,
       record.joinedAt,
       record.partyId,
       record.joinedAt,
