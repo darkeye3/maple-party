@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { SyntheticEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, BriefcaseBusiness, Calculator, CircleHelp, CircleUserRound, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, LogIn, LogOut, Plus, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound, X } from 'lucide-react';
+import { Activity, Calculator, CircleHelp, CircleUserRound, Crown, Database, ExternalLink, Gauge, KeyRound, Layers3, LogIn, LogOut, Plus, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -457,9 +457,6 @@ export default function Home() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-7 rounded-sm px-3 text-xs ${view === 'calculator' ? 'bg-white font-bold shadow-sm hover:bg-white' : 'text-[#687080]'}`}>보스 배율</Button>
             </nav>
             <div className="flex items-center gap-2">
-              <a href="/portfolio" className="hidden h-8 items-center gap-1.5 rounded-md border border-[#dfe2e8] bg-white px-2.5 text-xs font-semibold text-[#535b68] transition-colors hover:bg-[#f5f6f8] lg:inline-flex">
-                <BriefcaseBusiness className="size-3.5" /> 포트폴리오
-              </a>
               {authUser && (
                 <div className="hidden max-w-[610px] items-center gap-1.5 rounded-md border border-[#dfe2e8] bg-[#fafbfc] px-1.5 py-1 xl:flex">
                   <span className="px-1 text-[11px] font-bold text-[#687080]">캐릭터 {registeredCharacters.length}/{MAX_REGISTERED_CHARACTERS}</span>
@@ -534,9 +531,6 @@ export default function Home() {
         <nav className="flex border-b border-[#dfe2e8] bg-white p-1 sm:hidden" aria-label="주요 화면">
           <Button type="button" variant="ghost" size="sm" onClick={() => setView('parties')} className={`h-8 flex-1 rounded-sm text-xs ${view === 'parties' ? 'bg-[#20242c] font-bold text-white hover:bg-[#20242c] hover:text-white' : 'text-[#687080]'}`}>파티 모집</Button>
           <Button type="button" variant="ghost" size="sm" onClick={() => setView('calculator')} className={`h-8 flex-1 rounded-sm text-xs ${view === 'calculator' ? 'bg-[#20242c] font-bold text-white hover:bg-[#20242c] hover:text-white' : 'text-[#687080]'}`}>보스 배율</Button>
-          <a href="/portfolio" className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-sm px-2 text-xs font-semibold text-[#687080]">
-            <BriefcaseBusiness className="size-3.5" /> 포트폴리오
-          </a>
         </nav>
 
         <main>
